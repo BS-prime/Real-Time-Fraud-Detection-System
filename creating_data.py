@@ -1,3 +1,4 @@
+import os
 import pandas as pd
 import numpy as np
 import random
@@ -90,8 +91,8 @@ def generate_data(n_tx=10_000):
         
         auth = random.choice(["PIN", "Biometric", "Password"])
         
-        lat = round(np.random.normal(profile["home_lat"], 0.05), 6)
-        lon = round(np.random.normal(profile["home_lon"], 0.05), 6)
+        lat = round(np.random.normal(profile["home_lat"], 0.05), 6) # Generally users stay inside 60 km radius from their homes
+        lon = round(np.random.normal(profile["home_lon"], 0.05), 6) 
 
         
         # =========================================
@@ -156,7 +157,7 @@ df = generate_data(N_TX)
 # MySQL export
 # -------------------------
 engine = create_engine(
-    "mysql+mysqlconnector://root:password@localhost/banking_db"
+    f"mysql+mysqlconnector://{os.getenv('DB_USER')}:{os.getenv('DB_PASS')}@localhost/banking_db"
 )
 
 df.to_sql(
