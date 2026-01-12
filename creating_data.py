@@ -62,6 +62,7 @@ def generate_data(n_tx=10_000):
     data = []
 
     for _ in range(n_tx):
+        
         is_fraud = 0
         user_id = random.choice(list(users.keys()))
         profile = users[user_id]
@@ -72,19 +73,31 @@ def generate_data(n_tx=10_000):
         )
         profile["last_tx_time"] = timestamp
 
+        
+        # ========================================
         # ---- Normal behavior defaults
+        # ========================================
+
+
         category = random.choice(
             ["grocery", "food", "entertainment", "utilities", "tech"]
         )
         min_amt, max_amt = CATEGORY_RULES[category]
+        
         amount = round(random.uniform(min_amt, max_amt), 2)
-
+        
         device = random.choice(profile["devices"])
-        auth = random.choice(["PIN", "Biometric"])
+        
+        auth = random.choice(["PIN", "Biometric", "Password"])
+        
         lat = round(np.random.normal(profile["home_lat"], 0.05), 6)
         lon = round(np.random.normal(profile["home_lon"], 0.05), 6)
 
+        
+        # =========================================
         # ---- Fraud injection (single random draw)
+        # =========================================
+
         r = random.random()
 
         # Pattern 1: High Roller
