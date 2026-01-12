@@ -3,7 +3,6 @@ import pandas as pd
 import numpy as np
 import random
 from faker import Faker
-from sqlalchemy import create_engine
 from datetime import timedelta
 
 # -------------------------
@@ -151,21 +150,6 @@ def generate_data(n_tx=10_000):
 # -------------------------
 # Generate data
 # -------------------------
-df = generate_data(N_TX)
-
-# -------------------------
-# MySQL export
-# -------------------------
-engine = create_engine(
-    f"mysql+mysqlconnector://{os.getenv('DB_USER')}:{os.getenv('DB_PASS')}@localhost/banking_db"
-)
-
-df.to_sql(
-    name="transactions",
-    con=engine,
-    if_exists="replace",
-    index=False,
-    chunksize=1000
-)
-
-print("Data successfully exported to MySQL.")
+df_transactions = generate_data(10000)
+df_transactions.to_csv("transactions_2026.csv", index=False)
+print(f"Generated {len(df_transactions)} transactions. Fraud rate: {df_transactions.is_fraud.mean():.2%}")
