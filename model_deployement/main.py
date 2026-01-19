@@ -7,16 +7,11 @@ import numpy as np
 from pathlib import Path
 import math
 
-# ==============================================================================
-# App
-# ==============================================================================
-
-app = FastAPI(title="Fraud Guard 2026")
 
 
 
 # ==============================================================================
-# Model Loading (Explicit, Safe)
+# --- Model Loading ---
 # ==============================================================================
 
 MODEL_PATH = Path("model/fraud_detection_model.json")
@@ -49,7 +44,14 @@ DEFAULT_TIME_DELTA_MIN = 6.0  # fallback only
 
 
 # ==============================================================================
-# Request Schema
+# --- 1. App creation ---
+# ==============================================================================
+
+app = FastAPI(title="Fraud Guard 2026")
+
+
+# ==============================================================================
+# --- 2. Request Schema ---
 # ==============================================================================
 
 class Transaction(BaseModel):
@@ -109,7 +111,7 @@ def fraud_decision(prob: float) -> str:
 
 
 # ==============================================================================
-# Prediction Endpoint
+# --- 3. Prediction Endpoint ---
 # ==============================================================================
 
 @app.post("/predict")
@@ -123,9 +125,11 @@ async def predict_fraud(tx: Transaction):
         }
     )
 
-    # -----------------------------
-    # Feature Engineering
-    # -----------------------------
+    
+    # ================================================================
+    # --- a. Real-time Feature Engineering ---
+    # ================================================================
+    
     amount_ratio = tx.amount / (history["avg_spend"] + 1e-6)
 
     delta = coord_delta(
@@ -149,12 +153,15 @@ async def predict_fraud(tx: Transaction):
         columns=FEATURE_COLUMNS
     )
 
-    # -----------------------------
-    # Inference
-    # -----------------------------
+    
+    # ================================================================
+    # --- b. Inference ---
+    # ================================================================
+    
     try:
         dmatrix = xgb.DMatrix(feature_vector)
         probability = float(model.predict(dmatrix)[0])
+    
     except Exception:
         raise HTTPException(status_code=500, detail="Model inference failed")
 
@@ -170,12 +177,12 @@ async def predict_fraud(tx: Transaction):
 
 
 # ==============================================================================
-# Local Run
+# --- 4. Local Run ---
 # ==============================================================================
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
 
 
-# Use the following  url on your browser after running the python file 
+# Use the following url on your browser after running the python file 
 # http://localhost:8000/docs
