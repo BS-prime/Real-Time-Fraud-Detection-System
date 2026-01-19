@@ -3,3 +3,6 @@ numpy
 faker
 xgboost
 scikit-learn
+shap
+fastapi
+pydantic
