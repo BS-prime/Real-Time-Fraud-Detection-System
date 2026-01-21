@@ -70,6 +70,7 @@ class Transaction(BaseModel):
 # Mock Feature Store
 # ==============================================================================
 
+# Generally done from a sql database
 user_history = {
     "USER_123": {
         "avg_spend": 45.0,
@@ -102,7 +103,7 @@ def coord_delta(lat1, lon1, lat2, lon2) -> float:
     return R * c
 
 def fraud_decision(prob: float) -> str:
-    if prob > 0.91:
+    if prob > 0.91: # remember the business cost aware threshold
         return "Block"
     if prob > 0.6:
         return "Review"
@@ -116,6 +117,8 @@ def fraud_decision(prob: float) -> str:
 
 @app.post("/predict")
 async def predict_fraud(tx: Transaction):
+    
+    # Get the history of the user usually from a database
     history = user_history.get(
         tx.user_id,
         {
@@ -130,8 +133,10 @@ async def predict_fraud(tx: Transaction):
     # --- a. Real-time Feature Engineering ---
     # ================================================================
     
+    # Calculate the ratio between average spent and current amount
     amount_ratio = tx.amount / (history["avg_spend"] + 1e-6)
 
+    # Distance between current and previous transaction
     delta = coord_delta(
         tx.lat,
         tx.lon,
@@ -139,9 +144,13 @@ async def predict_fraud(tx: Transaction):
         history["last_lon"]
     )
 
+    # Time taken between each transaction
     time_delta = tx.time_delta_min or DEFAULT_TIME_DELTA_MIN
+
+    # speed to travel between current and previous coordinates
     travel_velocity = delta / time_delta
 
+    # Create a dataframe out of live feature engineering to feed into the model
     feature_vector = pd.DataFrame(
         [[
             tx.amount,
