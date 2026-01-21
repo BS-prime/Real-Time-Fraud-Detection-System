@@ -35,22 +35,27 @@ GLOBAL_AVG_SPEND = 60.0
 DEFAULT_TIME_DELTA_MIN = 6.0
 
 # ==============================================================================
-# App
+# --- 1. initializing fastapi instance ---
 # ==============================================================================
 
 app = FastAPI(title="Fraud Guard 2026")
 
+
+
 # ==============================================================================
-# Request schema
+# --- 2. Request schema ---
 # ==============================================================================
 
 class Transaction(BaseModel):
     user_id: str
     amount: float = Field(gt=0)
-    lat: float
-    lon: float
+    lat: float | None  = Field(le= 90.00)
+    lon: float | None  = Field(le= 180.00)
     auth_method: Literal["Biometric", "OTP", "Password"]
+    category: Literal["food", "grocery", "tech", "travel", "utilities", "entertainment"]
     time_delta_min: float | None = Field(default=None, gt=0)
+
+
 
 # ==============================================================================
 # Mock feature store
@@ -63,6 +68,8 @@ user_history = {
         "last_lon": -118.24,
     }
 }
+
+
 
 # ==============================================================================
 # Helpers
@@ -90,7 +97,11 @@ def fraud_decision(prob: float) -> str:
 @app.post("/predict")
 async def predict_fraud(tx: Transaction):
 
+
+    # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     # --- fetch history ---
+    # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
     history = user_history.get(
         tx.user_id,
         {
@@ -100,7 +111,11 @@ async def predict_fraud(tx: Transaction):
         },
     )
 
-    # --- feature engineering ---
+    
+    # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+    # --- real time feature engineering ---
+    # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
     amount_ratio = tx.amount / (history["avg_spend"] + 1e-6)
 
     delta = coord_delta(
@@ -110,8 +125,15 @@ async def predict_fraud(tx: Transaction):
         history["last_lon"],
     )
 
-    time_delta = tx.time_delta_min or DEFAULT_TIME_DELTA_MIN
     travel_velocity = delta / time_delta
+    
+    
+    # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+    # --- deterministic fallback ---
+    # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+    
+    time_delta = tx.time_delta_min or DEFAULT_TIME_DELTA_MIN
+    
 
     features = np.array(
         [[
@@ -125,9 +147,16 @@ async def predict_fraud(tx: Transaction):
     )
 
     if features.shape[1] != len(FEATURE_COLUMNS):
-        raise HTTPException(status_code=500, detail="Feature vector mismatch")
+        raise HTTPException(
+            status_code=500, 
+            detail="Feature vector mismatch"
+        )
 
+
+    # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     # --- inference ---
+    # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
     try:
         dmatrix = xgb.DMatrix(features, feature_names=FEATURE_COLUMNS)
         probability = float(model.predict(dmatrix)[0])
@@ -143,6 +172,8 @@ async def predict_fraud(tx: Transaction):
         "fraud_probability": round(probability, 4),
         "risk_level": "High" if decision != "Allow" else "Low",
     }
+
+
 
 # ==============================================================================
 # Local run
