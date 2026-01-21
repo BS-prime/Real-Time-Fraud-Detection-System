@@ -16,7 +16,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Step 5: Copy your API code and the trained model
 COPY . .
 
-# Step 6: Expose the port FastAPI runs on
+# Step 6: Expose the port FastAPI runs on port
 EXPOSE 8000
 
 # Step 7: Start the application using Uvicorn

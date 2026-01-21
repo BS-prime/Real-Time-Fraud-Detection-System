@@ -2,16 +2,11 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 from typing import Literal
 import xgboost as xgb
-import pandas as pd
 import numpy as np
 from pathlib import Path
-import math
-
-
-
 
 # ==============================================================================
-# --- Model Loading ---
+# Model loading (fail fast)
 # ==============================================================================
 
 MODEL_PATH = Path("model/fraud_detection_model.json")
@@ -20,11 +15,9 @@ if not MODEL_PATH.exists():
     raise RuntimeError("Model file not found")
 
 model = xgb.Booster()
-model.load_model(MODEL_PATH)
+model.load_model(str(MODEL_PATH))
 
 MODEL_VERSION = "fraud_xgb_v1.0"
-
-
 
 # ==============================================================================
 # Constants
@@ -39,19 +32,16 @@ FEATURE_COLUMNS = [
 ]
 
 GLOBAL_AVG_SPEND = 60.0
-DEFAULT_TIME_DELTA_MIN = 6.0  # fallback only
-
-
+DEFAULT_TIME_DELTA_MIN = 6.0
 
 # ==============================================================================
-# --- 1. App creation ---
+# App
 # ==============================================================================
 
 app = FastAPI(title="Fraud Guard 2026")
 
-
 # ==============================================================================
-# --- 2. Request Schema ---
+# Request schema
 # ==============================================================================
 
 class Transaction(BaseModel):
@@ -60,119 +50,90 @@ class Transaction(BaseModel):
     lat: float
     lon: float
     auth_method: Literal["Biometric", "OTP", "Password"]
-    time_delta_min: float | None = Field(
-        default=None, gt=0, description="Minutes since last transaction"
-    )
-
-
+    time_delta_min: float | None = Field(default=None, gt=0)
 
 # ==============================================================================
-# Mock Feature Store
+# Mock feature store
 # ==============================================================================
 
-# Generally done from a sql database
 user_history = {
     "USER_123": {
         "avg_spend": 45.0,
         "last_lat": 34.05,
-        "last_lon": -118.24
+        "last_lon": -118.24,
     }
 }
-
-
 
 # ==============================================================================
 # Helpers
 # ==============================================================================
 
 def coord_delta(lat1, lon1, lat2, lon2) -> float:
-    
-    R = 6371.0  # Earth radius in km
-
-    lat1 = np.radians(lat1)
-    lon1 = np.radians(lon1)
-    lat2 = np.radians(lat2)
-    lon2 = np.radians(lon2)
-
+    R = 6371.0  # km
+    lat1, lon1, lat2, lon2 = map(np.radians, [lat1, lon1, lat2, lon2])
     dlat = lat2 - lat1
     dlon = lon2 - lon1
-
     a = np.sin(dlat / 2) ** 2 + np.cos(lat1) * np.cos(lat2) * np.sin(dlon / 2) ** 2
-    c = 2 * np.arcsin(np.sqrt(a))
-
-    return R * c
+    return R * (2 * np.arcsin(np.sqrt(a)))
 
 def fraud_decision(prob: float) -> str:
-    if prob > 0.91: # remember the business cost aware threshold
+    if prob > 0.91:
         return "Block"
-    if prob > 0.6:
+    if prob > 0.60:
         return "Review"
     return "Allow"
 
-
-
 # ==============================================================================
-# --- 3. Prediction Endpoint ---
+# Prediction endpoint
 # ==============================================================================
 
 @app.post("/predict")
 async def predict_fraud(tx: Transaction):
-    
-    # Get the history of the user usually from a database
+
+    # --- fetch history ---
     history = user_history.get(
         tx.user_id,
         {
             "avg_spend": GLOBAL_AVG_SPEND,
             "last_lat": tx.lat,
-            "last_lon": tx.lon
-        }
+            "last_lon": tx.lon,
+        },
     )
 
-    
-    # ================================================================
-    # --- a. Real-time Feature Engineering ---
-    # ================================================================
-    
-    # Calculate the ratio between average spent and current amount
+    # --- feature engineering ---
     amount_ratio = tx.amount / (history["avg_spend"] + 1e-6)
 
-    # Distance between current and previous transaction
     delta = coord_delta(
         tx.lat,
         tx.lon,
         history["last_lat"],
-        history["last_lon"]
+        history["last_lon"],
     )
 
-    # Time taken between each transaction
     time_delta = tx.time_delta_min or DEFAULT_TIME_DELTA_MIN
-
-    # speed to travel between current and previous coordinates
     travel_velocity = delta / time_delta
 
-    # Create a dataframe out of live feature engineering to feed into the model
-    feature_vector = pd.DataFrame(
+    features = np.array(
         [[
             tx.amount,
             amount_ratio,
             delta,
             travel_velocity,
-            1 if tx.auth_method == "Biometric" else 0
+            1.0 if tx.auth_method == "Biometric" else 0.0,
         ]],
-        columns=FEATURE_COLUMNS
+        dtype=np.float32,
     )
 
-    
-    # ================================================================
-    # --- b. Inference ---
-    # ================================================================
-    
+    if features.shape[1] != len(FEATURE_COLUMNS):
+        raise HTTPException(status_code=500, detail="Feature vector mismatch")
+
+    # --- inference ---
     try:
-        dmatrix = xgb.DMatrix(feature_vector)
+        dmatrix = xgb.DMatrix(features, feature_names=FEATURE_COLUMNS)
         probability = float(model.predict(dmatrix)[0])
     
-    except Exception:
-        raise HTTPException(status_code=500, detail="Model inference failed")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Inference error: {e}")
 
     decision = fraud_decision(probability)
 
@@ -180,18 +141,13 @@ async def predict_fraud(tx: Transaction):
         "model_version": MODEL_VERSION,
         "decision": decision,
         "fraud_probability": round(probability, 4),
-        "risk_level": "High" if decision != "Allow" else "Low"
+        "risk_level": "High" if decision != "Allow" else "Low",
     }
 
-
-
 # ==============================================================================
-# --- 4. Local Run ---
+# Local run
 # ==============================================================================
+
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
-
-
-# Use the following url on your browser after running the python file 
-# http://127.0.0.1:8000/docs
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
