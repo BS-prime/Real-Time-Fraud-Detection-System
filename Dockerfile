@@ -14,7 +14,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Step 5: Copy your API code and the trained model
-COPY ./app/main.py ./model/fraud_detection_model.json
+COPY . .
 
 # Step 6: Expose the port FastAPI runs on
 EXPOSE 8000
