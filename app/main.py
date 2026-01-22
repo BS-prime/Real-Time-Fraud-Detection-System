@@ -114,6 +114,9 @@ hour = datetime.today().hour
 # ==============================================================================
 # Prediction endpoint
 # ==============================================================================
+@app.get("/")
+def health_check():
+    return {"status": "Fraud Guard 2026 is up and running."}
 
 @app.post("/predict")
 async def predict_fraud(tx: Transaction):
