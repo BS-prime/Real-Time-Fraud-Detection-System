@@ -20,7 +20,7 @@ COPY . .
 EXPOSE 8000
 
 # Step 7: Start the application using Uvicorn
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
 
 
 # Use this in terminal to build the Image: docker build -t fraud-guard-2026 .
