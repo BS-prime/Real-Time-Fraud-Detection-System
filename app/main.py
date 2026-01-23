@@ -165,13 +165,13 @@ async def predict_fraud(tx: Transaction):
     category_travel = 1 if tx.category == "travel" else 0
     category_utilities = 1 if tx.category == "utilities" else 0
 
+        
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     # --- deterministic fallback ---
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     
     time_delta = tx.time_delta_min or DEFAULT_TIME_DELTA_MIN
     
-
     features = np.array(
         [[
             tx.amount,
