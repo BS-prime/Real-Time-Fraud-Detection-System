@@ -10,7 +10,7 @@ from datetime import datetime
 # Model loading (fail fast)
 # ==============================================================================
 
-MODEL_PATH = Path("model/fraud_detection_model.json")
+MODEL_PATH = Path("artifacts/model/fraud_detection_model.json")
 
 if not MODEL_PATH.exists():
     raise RuntimeError("Model file not found")
@@ -74,6 +74,7 @@ class Transaction(BaseModel):
 # Mock feature store
 # ==============================================================================
 
+# since 
 user_history = {
     "USER_123": {
         "avg_spend": 45.0,
