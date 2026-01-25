@@ -64,7 +64,7 @@ class Transaction(BaseModel):
     amount: float = Field(gt=0)
     lat: float | None  = Field(le= 90.00, ge=-90.0)
     lon: float | None  = Field(le= 180.00, ge=-180.0)
-    auth_method: Literal["Biometric", "OTP", "Password"]
+    auth_method: Literal["Biometric", "PIN", "Password"]
     category: Literal["food", "grocery", "tech", "travel", "utilities", "entertainment"]
     time_delta_min: float | None = Field(default=None, gt=0)
     tx_count_24h: int | None = Field(default=3, ge=0)

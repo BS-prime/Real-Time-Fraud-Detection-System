@@ -46,4 +46,7 @@ If the velocity ($\text{dist} / \text{time}$) exceeds a commercial flight thresh
 
 ```bash
 docker build -t fraud-guard-2026 .
-```
+
+### 2. Run the Docker image
+```bash 
+docker run -p 8000:8000 fraud-detection-api
