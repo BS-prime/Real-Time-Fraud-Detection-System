@@ -1,3 +1,7 @@
+# ==============================================================================
+# --- Import the libraries ---
+# ==============================================================================
+
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 from typing import Literal
@@ -5,9 +9,12 @@ import xgboost as xgb
 import numpy as np
 from pathlib import Path
 from datetime import datetime
+from app.explain import ShapExplainer
+
+
 
 # ==============================================================================
-# Model loading (fail fast)
+# --- Model loading (fail fast) ---
 # ==============================================================================
 
 MODEL_PATH = Path("artifacts/model/v1.0_xgb_fraud_detection_model.json")
@@ -20,8 +27,10 @@ model.load_model(str(MODEL_PATH))
 
 MODEL_VERSION = "fraud_xgb_v1.0"
 
+
+
 # ==============================================================================
-# Constants
+# --- Constants ---
 # ==============================================================================
 
 FEATURE_COLUMNS = [
