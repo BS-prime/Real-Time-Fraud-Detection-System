@@ -5,11 +5,12 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 from typing import Literal
+import json
+import joblib
 import xgboost as xgb
 import numpy as np
 from pathlib import Path
 from datetime import datetime
-from app.explain import ShapExplainer
 
 
 
@@ -17,15 +18,29 @@ from app.explain import ShapExplainer
 # --- Model loading (fail fast) ---
 # ==============================================================================
 
-MODEL_PATH = Path("artifacts/model/v1.0_xgb_fraud_detection_model.json")
+PATH = Path("artifacts/model")
 
-if not MODEL_PATH.exists():
+MODEL_FILE = PATH / "v1.0_xgb_fraud_detection_model.json"
+
+if not MODEL_FILE.exists():
     raise RuntimeError("Model file not found")
 
 model = xgb.Booster()
-model.load_model(str(MODEL_PATH))
+model.load_model(str(MODEL_FILE))
 
 MODEL_VERSION = "fraud_xgb_v1.0"
+
+
+
+# ==============================================================================
+# --- Load optimal threshold ---
+# ==============================================================================
+
+if not (PATH / "optimal_threshold.json").exists():
+    raise RuntimeError("Threshold file not found")
+
+with open(PATH / "optimal_threshold.json") as f:
+    THRESHOLD = json.load(f)["best_threshold"]
 
 
 
@@ -56,6 +71,8 @@ FEATURE_COLUMNS = [
 GLOBAL_AVG_SPEND = 60.0
 DEFAULT_TIME_DELTA_MIN = 6.0
 
+
+
 # ==============================================================================
 # --- 1. initializing fastapi instance ---
 # ==============================================================================
@@ -79,11 +96,13 @@ class Transaction(BaseModel):
     tx_count_24h: int | None = Field(default=3, ge=0)
 
 
+
 # ==============================================================================
 # Mock feature store
 # ==============================================================================
 
-# since 
+# since we don't have a real feature store, we'll mock user historical data
+# In a real-world scenario, this would be fetched from a database or feature store
 user_history = {
     "USER_123": {
         "avg_spend": 45.0,
@@ -107,26 +126,22 @@ def coord_delta(lat1, lon1, lat2, lon2) -> float:
     return R * (2 * np.arcsin(np.sqrt(a)))
 
 
-# using probability by the model we make a decision
-def fraud_decision(prob: float) -> str:
-    if prob > 0.91: # remember the business cost aware threshold
-        return "Block"
-    if prob > 0.60:
-        return "Review"
-    return "Allow"
-
-
 # for current day of the week
 day_of_week = datetime.today().weekday()
+
 # current hour
 hour = datetime.today().hour
 
+
+
 # ==============================================================================
-# Prediction endpoint
+# --- 3. API Endpoints ---
 # ==============================================================================
+
 @app.get("/")
 def health_check():
     return {"status": "Fraud Guard 2026 is up and running."}
+
 
 @app.post("/predict")
 async def predict_fraud(tx: Transaction):
@@ -159,10 +174,7 @@ async def predict_fraud(tx: Transaction):
         tx.lon,
         history["last_lat"],
         history["last_lon"],
-    )
-
-    # travel velocity in km/h
-    travel_velocity_kmph = dist_from_last_tx_km / (tx.time_delta_min/60.0)
+    )  
     
     # handle auth method one-hot encoding
     auth_method_PIN = 1 if tx.auth_method == "PIN" else 0
@@ -182,6 +194,14 @@ async def predict_fraud(tx: Transaction):
     
     time_delta = tx.time_delta_min or DEFAULT_TIME_DELTA_MIN
     
+    # travel velocity in km/h
+    travel_velocity_kmph = dist_from_last_tx_km / (tx.time_delta_min / 60.0)
+    
+    
+    # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+    # --- prepare feature vector ---
+    # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
     features = np.array(
         [[
             tx.amount,
@@ -224,20 +244,22 @@ async def predict_fraud(tx: Transaction):
         probability = float(
             model.predict(dmatrix)[0]
         )
-    
+
+
     except Exception as e:
         raise HTTPException(
             status_code=500, 
             detail=f"Inference error: {e}"
         )
 
-    decision = fraud_decision(probability)
+    # determine prediction based on threshold
+    prediction = "fraud" if probability >= THRESHOLD else "legit"
+    
 
     return {
         "model_version": MODEL_VERSION,
-        "decision": decision,
         "fraud_probability": round(probability, 4),
-        "risk_level": "High" if decision != "Allow" else "Low",
+        "prediction": prediction
     }
 
 

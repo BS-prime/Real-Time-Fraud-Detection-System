@@ -6,3 +6,4 @@ pandas>=2.2.0
 numpy>=1.26.0
 shap>=0.44.0
 pydantic>=2.6.0
+evidently>=0.7.20
