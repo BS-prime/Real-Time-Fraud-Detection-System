@@ -6,3 +6,5 @@ __pycache__/
 .env
 venv
 drift_monitoring/
+.vscode/
+.DS_Store
