@@ -20,6 +20,10 @@ def compute_cost(
     cost_fn: float,
 ) -> float:
     
+    """
+    function to compute business cost based on confusion matrix.
+    """
+    
     # Compute business cost based on confusion matrix.
     tn, fp, fn, tp = confusion_matrix(y_true, y_pred).ravel()
     return (cost_fp * fp) + (cost_fn * fn)
@@ -38,6 +42,11 @@ def find_optimal_threshold(
     cost_fn: float = 10.0,
     thresholds: np.ndarray | None = None,
 ) -> dict:
+    
+    """
+    Find the optimal threshold that minimizes business cost.
+    """
+    
     
     if thresholds is None:
         thresholds = np.linspace(0.01, 0.99, 99)
@@ -63,6 +72,7 @@ def find_optimal_threshold(
 # parameter threshold_info.
 
 
+
 # ===================================================================================
 # --- 4. Save Threshold Metadata ---
 # ===================================================================================
@@ -71,6 +81,11 @@ def save_threshold(
     threshold_info: dict,
     path: Path,
 ) -> None:
+    
+    '''
+    Function to save new threshold information in a JSON file.
+    '''
+    
     
     # Save threshold information as JSON.
     path.parent.mkdir(parents=True, exist_ok=True)

@@ -48,6 +48,7 @@ with open(PATH / "optimal_threshold.json") as f:
 # --- Constants ---
 # ==============================================================================
 
+# feature columns must match training
 FEATURE_COLUMNS = [
     'amount',  
     'lat', 
@@ -68,6 +69,7 @@ FEATURE_COLUMNS = [
     'category_utilities'
 ]
 
+# default values for missing user history
 GLOBAL_AVG_SPEND = 60.0
 DEFAULT_TIME_DELTA_MIN = 6.0
 
