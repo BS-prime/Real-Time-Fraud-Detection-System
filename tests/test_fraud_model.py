@@ -12,17 +12,8 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 MODEL_PATH = (
     PROJECT_ROOT
     / "artifacts"
-    / "models"
-    / "artifacts"
     / "model"
     / "v1.0_xgb_fraud_detection_model.json"
-)
-
-import pytest
-
-@pytest.mark.skipif(
-    not MODEL_PATH.exists(),
-    reason="Trained model not found"
 )
 
 
