@@ -255,7 +255,12 @@ async def predict_fraud(tx: Transaction):
         )
 
     # determine prediction based on threshold
-    prediction = "fraud" if probability >= THRESHOLD else "legit"
+    if probability >= THRESHOLD:
+        prediction = "fraud"
+    elif THRESHOLD > probability >= 0.50:
+        prediction = "Review"
+    else:
+        prediction = "legit"
     
 
     return {
