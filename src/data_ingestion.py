@@ -222,10 +222,10 @@ def generate_transactions_data(
             output_path = Path(output_path)
             output_path.parent.mkdir(parents=True, exist_ok=True)      
             
-            # Save to CSV
+        # Save to CSV
         df.to_csv(output_path, index=False)
 
-            # Return path info
+        # Return path info
         print(f"Data saved to {output_path}")
         
     return df 
