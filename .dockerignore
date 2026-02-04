@@ -7,6 +7,4 @@ __pycache__/
 venv
 drift_monitoring/
 .vscode/
-.DS_Store
-streamlit_app.py
-reports
+reports/
