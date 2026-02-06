@@ -7,7 +7,7 @@ import pandas as pd
 import numpy as np
 import random
 from faker import Faker
-from datetime import timedelta ,timezone, datetime
+from datetime import timedelta 
 from pathlib import Path
 
 
@@ -217,7 +217,7 @@ def generate_transactions_data(
 
             output_dir = Path(__file__).resolve().parents[1] / "artifacts" / "data"
             output_dir.mkdir(parents=True, exist_ok=True)
-            output_path = output_dir / f"simulated_transactions_v{seed}_0.csv"
+            output_path = output_dir / f"simulated_transactions_seed_{seed}.csv"
         else:
             output_path = Path(output_path)
             output_path.parent.mkdir(parents=True, exist_ok=True)      
