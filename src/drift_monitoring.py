@@ -1,6 +1,6 @@
-# ===================================================================================
+# ======================================================================================
 # --- Imports ---
-# ===================================================================================
+# ======================================================================================
 
 import pandas as pd
 from datetime import datetime, timezone
@@ -14,61 +14,77 @@ from evidently.metric_preset import (
     TargetDriftPreset
 )
 
-# ===================================================================================
-# --- Defining path ---
-# ===================================================================================
-
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-REPORTS_DIR = PROJECT_ROOT / "reports" / "drift_monitoring"
-REPORTS_DIR.mkdir(parents=True, exist_ok=True)
 
 
-# ===================================================================================
+# ======================================================================================
 # --- Core Monitoring Function ---
-# ===================================================================================
+# ======================================================================================
 
 def generate_monitoring_report(
-    model,
-    X_train,
-    X_test,
-    y_train=None,
-    y_test=None,
-    numerical_features=None,
-    categorical_features=None,
-    drift_fail_threshold=0.5,
-    output_dir=REPORTS_DIR,
+    model: str | None = 'artifacts/model/xgb_v1_0.json',
+    drift_fail_threshold: float | None = 0.5,
+    reference_path: str | None = 'artifacts/data/simulated_transactions_v42_0.csv',
+    current_path: str | None = 'artifacts/data/simulated_transactions_v69_0.csv',
+    output_dir = 'reports/drift_monitoring'
 ):
     
-    '''
-    Generate a monitoring report using Evidently.
-    '''
+
+    # ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+    # --- 0. Defining path ---
+    # ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+    # Locate the project root
+    PROJECT_ROOT = Path(__file__).resolve().parents[1]
+    
+    # Create the output directory
+    REPORTS_DIR = PROJECT_ROOT / Path(output_dir)
+    REPORTS_DIR.mkdir(parents=True, exist_ok=True)
+    
+    # Locate the csv files
+    CURRENT_PATH = PROJECT_ROOT / Path(current_path)
+    REFERENCE_PATH = PROJECT_ROOT/ Path(reference_path)
+
 
 
     # ==================================================================================
     # --- 1. Normalize inputs ---
     # ==================================================================================
 
-    X_train = pd.DataFrame(X_train).copy()
-    X_test = pd.DataFrame(X_test).copy()
-
+    # Put the csv files into DataFrames
+    df_current = pd.read_csv(CURRENT_PATH)
+    df_reference = pd.read_csv(REFERENCE_PATH)
+    
+    # Selecting the features
+    X_train = df_current.drop(columns=['is_fraud'])
+    X_test = df_reference.drop(columns=['is_fraud'])
+    
+    # Selecting the target
+    y_train = df_current['is_fraud']
+    y_test = df_reference['is_fraud']
+    
+    # Get the column names
     X_train.columns = X_train.columns.astype(str)
     X_test.columns = X_test.columns.astype(str)
 
-    output_dir = Path(output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
+    # Separating the numerical and categorical features
+    numerical_features = X_train.select_dtypes(include=['int64', 'float64']).columns.tolist()
+    categorical_features = X_train.select_dtypes(include=['object', 'category', 'bool']).columns.tolist()
 
 
 
     # ==================================================================================
-    # --- 2. Build reference & current datasets ---
+    # --- 2. Inclusion of target and prediction columns ---
     # ==================================================================================
 
+    # Copy the features to a new DataFrame
     reference = X_train.copy()
     current = X_test.copy()
 
-    target_col = "__target__" if y_train is not None and y_test is not None else None
+    # Create empty columns for target and prediction
+    target_col = "__target__" 
     prediction_col = "__prediction__"
 
+    # Fill the empty columns
     if target_col:
         reference[target_col] = y_train.values
         current[target_col] = y_test.values
@@ -80,12 +96,13 @@ def generate_monitoring_report(
         reference[prediction_col] = model.predict(X_train)
         current[prediction_col] = model.predict(X_test)
 
-
+    
 
     # ==================================================================================
     # --- 3. Column mapping ---
     # ==================================================================================
 
+    # Let evidently know what type of columns he is dealing with
     column_mapping = ColumnMapping(
         target=target_col,
         numerical_features=numerical_features,
@@ -99,13 +116,12 @@ def generate_monitoring_report(
     # --- 4. Metrics ---
     # ==================================================================================
 
+    # Let evidently know what it should measure
     metrics = [
         DataDriftPreset(),
         DataQualityPreset(),
+        TargetDriftPreset()
     ]
-
-    if target_col:
-        metrics.append(TargetDriftPreset())
 
 
 
@@ -113,6 +129,7 @@ def generate_monitoring_report(
     # --- 5. Run Evidently ---
     # ==================================================================================
 
+    # Create a nice report :)
     report = Report(metrics=metrics)
 
     report.run(
@@ -127,11 +144,21 @@ def generate_monitoring_report(
     # --- 6. Save report (HTML) ---
     # ==================================================================================
 
-    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-    report_path = output_dir / f"drift_report_{timestamp}.html"
+    # Preserving version names for clearity
+    ref_ver = Path(reference_path).name
 
+    # Same thing for current
+    curr_ver = Path(current_path).name
+
+    # Define the report path
+    output_dir = REPORTS_DIR
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    report_path = output_dir / f"drift_report_{curr_ver}_vs_{ref_ver}_{timestamp}.html"
+
+    # Save the report
     report.save_html(report_path.as_posix())
 
+    # Verify the report was written
     assert report_path.exists(), "HTML report was NOT written"
 
 
@@ -158,14 +185,14 @@ def generate_monitoring_report(
     # ==================================================================================
 
     if drift_score >= drift_fail_threshold:
-        status = "FAIL"
+        status = "CRITICAL FAILURE!!! RETRAIN IMMEDIATELY"
     elif drift_score >= drift_fail_threshold * 0.6:
-        status = "WARN"
+        status = "WARNING!!! attention required."
     else:
-        status = "PASS"
+        status = "No action needed!!!"
 
     print("====================================")
-    print("Train–Test Drift Monitoring")
+    print("Data and Target Drift Monitoring")
     print(f"Status      : {status}")
     print(f"Drift score : {drift_score:.2f}")
     print(f"Report      : {report_path.resolve()}")
@@ -176,3 +203,22 @@ def generate_monitoring_report(
         "drift_score": drift_score,
         "report_path": str(report_path.resolve()),
     }
+
+
+
+# ==================================================================================
+# --- Run the Script ---
+# ==================================================================================
+
+if __name__ == '__main__':
+
+    print("=" *70)
+    print("Checking for data drift...")
+    print("=" *70)
+    print()
+    
+    generate_monitoring_report()
+
+    print("\n" + "=" *70)
+    print("Drift Report Ready!!!")
+    print("=" *70)

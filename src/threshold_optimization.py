@@ -1,6 +1,6 @@
-# ===================================================================================
-# --- 1. Import the libraries ---
-# ===================================================================================
+# ====================================================================================================
+# --- Import the libraries ---
+# ====================================================================================================
 
 from pathlib import Path
 import json
@@ -9,85 +9,130 @@ from sklearn.metrics import confusion_matrix
 
 
 
-# ===================================================================================
-# --- 2. Threshold Optimization Functions ---
-# ===================================================================================
+# ====================================================================================================
+# --- Core Threshold Optimization Function ---
+# ====================================================================================================
 
-def compute_cost(
-    y_true: np.ndarray,
-    y_pred: np.ndarray,
-    cost_fp: float,
-    cost_fn: float,
-) -> float:
+def threshold_optimizer(
+        y_true: np.ndarray,
+        y_pred: np.ndarray,
+        model_path: str,
+        cost_fp: float | None = 1.0,
+        cost_fn: float | None = 10.0,  
+) -> json:
     
-    """
-    function to compute business cost based on confusion matrix.
-    """
-    
-    # Compute business cost based on confusion matrix.
-    tn, fp, fn, tp = confusion_matrix(y_true, y_pred).ravel()
-    return (cost_fp * fp) + (cost_fn * fn)
+    '''
+    Function to find the optimal threshold that minimizes 
+    business cost and save it in a JSON file.
+    '''
 
 
+    
+    # ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+    # --- 1. Defining Paths ---
+    # ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
-# ===================================================================================
-# --- 3. Find Optimal Threshold ---
-# ===================================================================================
+    # Locate the project root directory
+    ROOT_DIR = Path(__file__).resolve().parents[2]
 
-# Find the optimal probability threshold to minimize business cost.
-def find_optimal_threshold(
-    y_true: np.ndarray,
-    y_prob: np.ndarray,
-    cost_fp: float = 1.0,
-    cost_fn: float = 10.0,
-    thresholds: np.ndarray | None = None,
-) -> dict:
+    # Define the input and output paths
+    OUTPUT_DIR = ROOT_DIR / Path("artifacts/model_thresholds")
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
+    # Extract model name from the model path for naming the JSON file.
+    model_name = Path(model_path).stem
+        
+    # Setting up the path to save the json file
+    path = OUTPUT_DIR / f"optimal_threshold_{model_name}.json"
     
-    """
-    Find the optimal threshold that minimizes business cost.
-    """
-    
-    
-    if thresholds is None:
+    # ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+    # --- 2. Threshold Optimization Functions ---
+    # ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+    def compute_cost(
+        y_true: np.ndarray,
+        y_pred: np.ndarray,
+        cost_fp: float,
+        cost_fn: float,
+    ) -> float:
+        
+        """
+        Function to compute business cost based on confusion matrix.
+        """
+        
+        # Compute business cost based on confusion matrix.
+        tn, fp, fn, tp = confusion_matrix(y_true, y_pred).ravel()
+        return (cost_fp * fp) + (cost_fn * fn)
+
+
+
+    # ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+    # --- 3. Find Optimal Threshold ---
+    # ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+    # Find the optimal probability threshold to minimize business cost.
+    def find_optimal_threshold(
+        y_true: np.ndarray,
+        y_prob: np.ndarray,
+        cost_fp: float | None = 1.0,
+        cost_fn: float | None = 10.0
+    ) -> dict:
+        
+        """
+        Find the optimal threshold that minimizes business cost.
+        """
+        
+        
         thresholds = np.linspace(0.01, 0.99, 99)
 
-    best_threshold = 0.5
-    min_cost = float("inf")
+        y_true = y_true.to_numpy()
 
-    for t in thresholds:
-        y_pred = (y_prob >= t).astype(int)
-        cost = compute_cost(y_true, y_pred, cost_fp, cost_fn)
+        best_threshold = 0.5
+        min_cost = float("inf")
 
-        if cost < min_cost:
-            min_cost = cost
-            best_threshold = float(t)
+        for t in thresholds:
+            y_pred = (y_prob >= t).astype(int)
+            cost = compute_cost(y_true, y_pred, cost_fp, cost_fn)
 
-    return {
-        "best_threshold": best_threshold,
-        "min_cost": float(min_cost),
-        "cost_fp": cost_fp,
-        "cost_fn": cost_fn,
-    }
-# Put the result in a variable to use later in the save_threshold function in the
-# parameter threshold_info.
+            if cost < min_cost:
+                min_cost = cost
+                best_threshold = float(t)
 
-
-
-# ===================================================================================
-# --- 4. Save Threshold Metadata ---
-# ===================================================================================
-
-def save_threshold(
-    threshold_info: dict,
-    path: Path,
-) -> None:
+        return {
+            "best_threshold": best_threshold,
+            "min_cost": float(min_cost),
+            "cost_fp": cost_fp,
+            "cost_fn": cost_fn,
+        }
     
-    '''
-    Function to save new threshold information in a JSON file.
-    '''
-    
-    
-    # Save threshold information as JSON.
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "w") as f:
-        json.dump(threshold_info, f, indent=2)
+    # Call the find_optimal_threshold function to get the optimal threshold information.
+    threshold_info = find_optimal_threshold(
+        y_true=y_true,
+        y_prob=y_pred,
+        cost_fp=cost_fp,
+        cost_fn=cost_fn,
+    )
+
+
+    # ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+    # --- 4. Save Threshold Metadata ---
+    # ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+    def save_threshold(
+        threshold_info = threshold_info,
+        path = path
+    ) -> json:
+        
+        '''
+        Function to save new threshold information in a JSON file.
+        '''
+        
+
+        # Save the threshold information as a JSON file.
+        with open(path, "w") as f:
+            json.dump(threshold_info, f, indent=2)
+
+    # Call the save_threshold function to save the optimal threshold information.
+    save_threshold(threshold_info, OUTPUT_DIR)
+
+    return threshold_info , path 

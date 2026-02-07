@@ -37,8 +37,7 @@ def generate_transactions_data(
     n_tx: int | None = 10_000,
     n_users: int | None = 500,
     seed: int | None = 42,
-    output_path: str | None = None,
-    save: bool | None = True,
+    save: bool | None = True
 ):
     
     '''
@@ -213,14 +212,11 @@ def generate_transactions_data(
     df = generate_data(n_tx, n_users)
 
     if save:
-        if output_path is None:
 
-            output_dir = Path(__file__).resolve().parents[1] / "artifacts" / "data"
-            output_dir.mkdir(parents=True, exist_ok=True)
-            output_path = output_dir / f"simulated_transactions_seed_{seed}.csv"
-        else:
-            output_path = Path(output_path)
-            output_path.parent.mkdir(parents=True, exist_ok=True)      
+        output_dir = Path(__file__).resolve().parents[1] / "artifacts" / "data"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        output_path = output_dir / f"simulated_transactions_seed_{seed}.csv"
+              
             
         # Save to CSV
         df.to_csv(output_path, index=False)
@@ -228,7 +224,10 @@ def generate_transactions_data(
         # Return path info
         print(f"Data saved to {output_path}")
         
-    return df 
+    print(f"Generated {len(df)} transactions.\n \
+          Fraud rate: {df.is_fraud.mean():.2%}")
+    
+    return df
 
 
 
