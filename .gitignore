@@ -10,3 +10,4 @@ drift_monitoring/
 .DS_Store
 streamlit_app.py
 reports
+fraud_detection.egg-info
