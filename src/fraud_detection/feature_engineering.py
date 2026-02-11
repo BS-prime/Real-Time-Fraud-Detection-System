@@ -291,7 +291,7 @@ def feature_engineering(
     print()
     
     # Print the csv file location
-    print(f"Saved at: {OUTPUT_PATH}")
+    print(f"Features saved at: {OUTPUT_DIR}")
 
     print()
     

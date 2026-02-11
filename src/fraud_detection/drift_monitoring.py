@@ -2,9 +2,12 @@
 # --- Imports ---
 # ======================================================================================
 
+import joblib
 import pandas as pd
 from datetime import datetime, timezone
 from pathlib import Path
+
+import xgboost as xgb
 
 from evidently.report import Report
 from evidently import ColumnMapping
@@ -21,12 +24,11 @@ from evidently.metric_preset import (
 # ======================================================================================
 
 def generate_monitoring_report(
-    model: str | None = 'artifacts/model/xgb_v1_0.json',
-    drift_fail_threshold: float | None = 0.5,
-    reference_path: str | None = 'artifacts/data/simulated_transactions_v42_0.csv',
-    current_path: str | None = 'artifacts/data/simulated_transactions_v69_0.csv',
-    output_dir = 'reports/drift_monitoring'
-):
+        model_name: str,
+        trained_dataset: str,
+        new_dataset: str,
+        drift_fail_threshold: float | None = 0.5
+    ):
     
 
     # ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
@@ -37,15 +39,25 @@ def generate_monitoring_report(
     PROJECT_ROOT = Path(__file__).resolve().parents[2]
     
     # Create the output directory
-    REPORTS_DIR = PROJECT_ROOT / Path(output_dir)
+    REPORTS_DIR = PROJECT_ROOT / "reports" / "drift_monitoring"
     REPORTS_DIR.mkdir(parents=True, exist_ok=True)
     
     # Locate the csv files
-    CURRENT_PATH = PROJECT_ROOT / Path(current_path)
-    REFERENCE_PATH = PROJECT_ROOT/ Path(reference_path)
+    CURRENT_PATH = PROJECT_ROOT / "data"/ "simulated"/ new_dataset
+    REFERENCE_PATH = PROJECT_ROOT / "data"/ "simulated"/ trained_dataset
 
+    # Model Path
+    MODEL_PATH = PROJECT_ROOT / "artifacts" / "models" / model_name
+    
+    # Load model
+    try:
+        model = joblib.load(MODEL_PATH)
+    except:
+        model = xgb.Booster()
+        model.load_model(str(MODEL_PATH))
 
-
+    
+    
     # ==================================================================================
     # --- 1. Normalize inputs ---
     # ==================================================================================
@@ -145,15 +157,14 @@ def generate_monitoring_report(
     # ==================================================================================
 
     # Preserving version names for clearity
-    ref_ver = Path(reference_path).name
+    ref_ver = Path(REFERENCE_PATH).stem
 
     # Same thing for current
-    curr_ver = Path(current_path).name
+    curr_ver = Path(CURRENT_PATH).stem
 
-    # Define the report path
-    output_dir = REPORTS_DIR
+    # Define the report path with timestamps
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-    report_path = output_dir / f"drift_report_{curr_ver}_vs_{ref_ver}_{timestamp}.html"
+    report_path = REPORTS_DIR / f"drift_report_{curr_ver}_vs_{ref_ver}_{timestamp}.html"
 
     # Save the report
     report.save_html(report_path.as_posix())
@@ -203,22 +214,3 @@ def generate_monitoring_report(
         "drift_score": drift_score,
         "report_path": str(report_path.resolve()),
     }
-
-
-
-# ==================================================================================
-# --- Run the Script ---
-# ==================================================================================
-
-if __name__ == '__main__':
-
-    print("=" *70)
-    print("Checking for data drift...")
-    print("=" *70)
-    print()
-    
-    generate_monitoring_report()
-
-    print("\n" + "=" *70)
-    print("Drift Report Ready!!!")
-    print("=" *70)

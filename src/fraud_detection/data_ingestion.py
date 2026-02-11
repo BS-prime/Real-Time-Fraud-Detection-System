@@ -241,7 +241,7 @@ def generate_transactions_data(
     print()
     
     # Print the output path
-    print(f"Data saved to: {OUTPUT_PATH}") 
+    print(f"Data saved to: {OUTPUT_DIR}") 
 
     print()
 

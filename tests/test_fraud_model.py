@@ -9,12 +9,7 @@ from pathlib import Path
 # Define model path
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
-MODEL_PATH = (
-    PROJECT_ROOT
-    / "artifacts"
-    / "model"
-    / "v1.0_xgb_fraud_detection_model.json"
-)
+MODEL_PATH = PROJECT_ROOT / Path("artifacts/models/xgboost_seed_42.json")
 
 
 
