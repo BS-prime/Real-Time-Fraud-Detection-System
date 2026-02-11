@@ -13,12 +13,11 @@ from .model_evaluation import model_evaluator
 from .drift_monitoring import generate_monitoring_report
 
 
-'''
+"""
 This is what will be suggesting inside code editor after
 someone use 
 'from fraud_detection import ? '
-'''
-
+"""
 
 
 __all__ = [
@@ -27,5 +26,5 @@ __all__ = [
     "model_trainer",
     "generate_monitoring_report",
     "threshold_optimizer",
-    "model_evaluator"
+    "model_evaluator",
 ]

@@ -6,9 +6,8 @@ import pandas as pd
 import numpy as np
 import random
 from faker import Faker
-from datetime import timedelta 
+from datetime import timedelta
 from pathlib import Path
-
 
 
 # ============================================================================
@@ -21,26 +20,23 @@ CATEGORY_RULES = {
     "entertainment": (10, 500),
     "utilities": (50, 400),
     "tech": (100, 3000),
-    "travel": (500, 5000)
+    "travel": (500, 5000),
 }
 
 AUTH_METHODS = ["PIN", "Biometric", "Password"]
-
 
 
 # ============================================================================
 # --- Data Generation Function ---
 # ============================================================================
 
+
 def generate_transactions_data(
-        n_tx: int | None = 10_000,
-        n_users: int | None = 500,
-        seed: int | None = 42
-    )-> pd.DataFrame:
-    
-    '''
+    n_tx: int | None = 10_000, n_users: int | None = 500, seed: int | None = 42
+) -> pd.DataFrame:
+    """
     Docstring for generate_transactions_data
-    
+
     :param n_tx: Number of transactions to generate
     :type n_tx: int | None
     :param n_users: Number of users to generate profiles for
@@ -49,18 +45,14 @@ def generate_transactions_data(
     :type seed: int | None
     :return: Generated synthetic transaction data
     :rtype: DataFrame
-    '''
-    
+    """
+
     if seed is not None:
-        
         Faker.seed(seed)
         random.seed(seed)
         np.random.seed(seed)
-    
 
     fake = Faker()
-    
-
 
     # ============================================================================
     # --- Create Output Directory ---
@@ -71,18 +63,14 @@ def generate_transactions_data(
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     OUTPUT_PATH = OUTPUT_DIR / f"simulated_transactions_seed_{seed}.csv"
 
-    
-    
     # ============================================================================
     # --- Define the user profiles ---
     # ============================================================================
 
     def create_users(n_users):
-
-        '''
+        """
         Create synthetic user profiles.
-        '''
-
+        """
 
         users = {}
 
@@ -100,35 +88,26 @@ def generate_transactions_data(
                 "devices": devices,
                 "home_lat": home_lat,
                 "home_lon": home_lon,
-                "last_tx_time": fake.date_time_this_year()
+                "last_tx_time": fake.date_time_this_year(),
             }
 
         return users
-
-
 
     # ============================================================================
     # --- Genrerate Transactions ---
     # ============================================================================
 
-    def generate_data(
-            n_tx, 
-            n_users
-        ) -> pd.DataFrame:
-
-        '''
-        Using the user profiles, 
+    def generate_data(n_tx, n_users) -> pd.DataFrame:
+        """
+        Using the user profiles,
         generate synthetic transaction data,
         injecting fraud patterns.
-        '''
-
-
+        """
 
         users = create_users(n_users)
         data = []
 
         for _ in range(n_tx):
-            
             is_fraud = 0
             user_id = random.choice(list(users.keys()))
             profile = users[user_id]
@@ -142,29 +121,24 @@ def generate_transactions_data(
             )
             profile["last_tx_time"] = timestamp
 
-            
-            
             # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
             # ---- Normal behavior defaults ---
             # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-
 
             category = random.choice(
                 ["grocery", "food", "entertainment", "utilities", "tech"]
             )
             min_amt, max_amt = CATEGORY_RULES[category]
-            
+
             amount = round(random.uniform(min_amt, max_amt), 2)
-            
+
             device = random.choice(profile["devices"])
-            
+
             auth = random.choice(["PIN", "Biometric", "Password"])
-            
+
             # Generally users stay inside 60 km radius from their homes
-            lat = round(profile["home_lat"] + random.uniform(-0.05, 0.05), 6) 
-            lon = round(profile["home_lon"] + random.uniform(-0.05, 0.05), 6) 
-
-
+            lat = round(profile["home_lat"] + random.uniform(-0.05, 0.05), 6)
+            lon = round(profile["home_lon"] + random.uniform(-0.05, 0.05), 6)
 
             # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
             # ---- Fraud injection (single random draw)
@@ -188,19 +162,21 @@ def generate_transactions_data(
                 timestamp += timedelta(minutes=5)
                 is_fraud = 1
 
-            data.append([
-                fake.uuid4()[:12],
-                timestamp,
-                user_id,
-                amount,
-                category,
-                device,
-                auth,
-                lat,
-                lon,
-                fake.ipv4(),
-                is_fraud
-            ])
+            data.append(
+                [
+                    fake.uuid4()[:12],
+                    timestamp,
+                    user_id,
+                    amount,
+                    category,
+                    device,
+                    auth,
+                    lat,
+                    lon,
+                    fake.ipv4(),
+                    is_fraud,
+                ]
+            )
 
         df = pd.DataFrame(
             data,
@@ -215,41 +191,37 @@ def generate_transactions_data(
                 "lat",
                 "lon",
                 "ip_address",
-                "is_fraud"
-            ]
+                "is_fraud",
+            ],
         )
 
         return df
 
-
-
     # ===========================================================================================
     # --- Save Data ---
-    # ===========================================================================================    
-    
+    # ===========================================================================================
+
     df = generate_data(n_tx, n_users)
-            
+
     # Save to CSV
     df.to_csv(OUTPUT_PATH, index=False)
 
-    
     print("=" * 70)
-    
+
     # Print the csv filename
     print(f"Name of the csv file: 'simulated_transactions_seed_{seed}.csv'")
 
     print()
-    
+
     # Print the output path
-    print(f"Data saved to: {OUTPUT_DIR}") 
+    print(f"Data saved to: {OUTPUT_DIR}")
 
     print()
 
-    # Print some info about the data    
+    # Print some info about the data
     print(f"Generated {len(df)} transactions.")
-    print(f"Fraud rate: {df.is_fraud.mean():.2%}")       
-    
-    print("=" * 70)
-    
-    return df
+    print(f"Fraud rate: {df.is_fraud.mean():.2%}")
 
+    print("=" * 70)
+
+    return df
