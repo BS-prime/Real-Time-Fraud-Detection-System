@@ -1,12 +1,17 @@
 # Fixing suggestions
 
-
+# Data
 from .data_ingestion import generate_transactions_data
 from .feature_engineering import feature_engineering
+
+# Model
 from .model_training import model_trainer
-from .drift_monitoring import generate_monitoring_report
 from .threshold_optimization import threshold_optimizer
+
+# Evaluation
 from .model_evaluation import model_evaluator
+from .drift_monitoring import generate_monitoring_report
+
 
 '''
 This is what will be suggesting inside code editor after

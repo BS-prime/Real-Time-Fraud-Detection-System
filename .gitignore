@@ -9,5 +9,5 @@ drift_monitoring/
 .vscode
 .DS_Store
 streamlit_app.py
-reports
+reports/
 fraud_detection.egg-info/
