@@ -137,6 +137,77 @@ hour = datetime.today().hour
 
 
 # ==============================================================================
+# --- Decision Logic Layer (Business Logic)
+# ==============================================================================
+
+def get_risk_band(probability: float) -> str:
+    """Maps probability to human-readable risk level."""
+    if probability >= 0.85:
+        return "VERY_HIGH"
+    elif probability >= 0.65:
+        return "HIGH"
+    elif probability >= 0.40:
+        return "MEDIUM"
+    else:
+        return "LOW"
+
+
+def decide_action(probability: float, threshold: float) -> str:
+    """Determines business action based on probability."""
+    if probability >= threshold:
+        return "BLOCK"
+    elif probability >= 0.50:
+        return "CHALLENGE"
+    else:
+        return "ALLOW"
+
+
+def get_decision_reasons(
+    amount_ratio: float,
+    travel_velocity_kmph: float,
+    tx_count_24h: int
+) -> list[str]:
+    """Provides human-readable explanation signals."""
+    
+    reasons = []
+
+    if amount_ratio >= 3:
+        reasons.append("Transaction amount significantly higher than user's normal spending")
+
+    if travel_velocity_kmph >= 800:
+        reasons.append("Transaction location implies unrealistic travel speed")
+
+    if tx_count_24h >= 20:
+        reasons.append("Unusually high number of transactions in past 24 hours")
+
+    if amount_ratio >= 10 or travel_velocity_kmph >= 1500:
+        reasons.append("Extreme deviation from user spending behavior")
+
+    return reasons[:3]  # limit to top 3
+
+
+def get_fallbacks_used(
+    tx,
+    history
+) -> list[str]:
+    """Reports fallback defaults used during feature engineering."""
+    
+    fallbacks = []
+
+    if tx.time_delta_min is None:
+        fallbacks.append("DEFAULT_TIME_DELTA_USED")
+
+    if history["avg_spend"] == GLOBAL_AVG_SPEND:
+        fallbacks.append("GLOBAL_AVG_SPEND_USED")
+
+    if history["last_lat"] == tx.lat and history["last_lon"] == tx.lon:
+        fallbacks.append("NO_LOCATION_HISTORY")
+
+    return fallbacks
+
+
+
+# ==============================================================================
 # --- 3. API Endpoints ---
 # ==============================================================================
 
@@ -254,19 +325,48 @@ async def predict_fraud(tx: Transaction):
             detail=f"Inference error: {e}"
         )
 
-    # determine prediction based on threshold
-    if probability >= THRESHOLD:
-        prediction = "fraud"
-    elif THRESHOLD > probability >= 0.50:
-        prediction = "Review"
-    else:
-        prediction = "legit"
-    
+    # ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+    # --- Decision Layer ---
+    # ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+    risk = get_risk_band(probability)
+
+    action = decide_action(
+        probability,
+        THRESHOLD
+    )
+
+    reasons = get_decision_reasons(
+        amount_ratio,
+        travel_velocity_kmph,
+        tx.tx_count_24h
+    )
+
+    fallbacks_used = get_fallbacks_used(
+        tx,
+        history
+    )
+
+
+    # ==============================================================================
+    # --- Final Response ---
+    # ==============================================================================
 
     return {
         "model_version": MODEL_VERSION,
+
+        # model output
         "fraud_probability": round(probability, 4),
-        "prediction": prediction
+
+        # business interpretation
+        "risk_band": risk,
+        "recommended_action": action,
+
+        # explainability
+        "decision_reasons": reasons,
+
+        # transparency
+        "fallbacks_used": fallbacks_used
     }
 
 
