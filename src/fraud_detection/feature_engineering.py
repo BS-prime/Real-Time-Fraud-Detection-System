@@ -13,32 +13,53 @@ import numpy as np
 # =====================================================================================
 
 def feature_engineering(
-        input_path: str | None = 'artifacts/data/simulated_transactions_seed_42.csv',
-        save: bool | None = True
-    ):
+        csv_name: str | None = 'simulated_transactions_seed_42.csv'
+    )-> pd.DataFrame:
 
     '''
-    Function to perform feature engineering on the transaction data.
-    It reads the raw transaction data, creates new features, 
-    and saves the processed features to a new CSV file.
-    It can be called from notebooks also run directly with default data.
+    Docstring for feature_engineering
+    
+    :param csv_name: Just put the name of the csv file that is generated from 
+    the data generation step, it should be in the format 
+    'simulated_transactions_seed_XX.csv' where XX is the seed number 
+    used in data generation. The csv file should be located in 
+    artifacts/data folder.
+    
+    :type csv_name: str | None
     '''
 
+
+
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-    # --- Load csv ---
+    # --- Getting the output path ready ---
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
-    def load_data(input_path: str) -> pd.DataFrame:
+    # Extract version number from file name for saving
+    file_text = csv_name
+    curr_ver = __import__('re').search(r'_seed_(\d+)', file_text).group(1)
 
-        ROOT_DIR = Path(__file__).resolve().parents[1]
-        FILE_PATH = ROOT_DIR / Path(input_path)
+    # Create directory to save the csv
+    OUTPUT_DIR = Path(__file__).resolve().parents[2] / "data" / "features"
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)    
+    OUTPUT_PATH = OUTPUT_DIR / f"fraud_features_seed_{curr_ver}.csv" 
+
+
+
+    # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+    # --- Load csv (for string path) ---
+    # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+    def load_data(csv_name: str) -> pd.DataFrame:
+
+        ROOT_DIR = Path(__file__).resolve().parents[2]
+        FILE_PATH = ROOT_DIR / "data" / "simulated" / csv_name
 
         df = pd.read_csv(FILE_PATH)
+        
         return df
     
-
-    df = load_data(input_path)
-
+    df = load_data(csv_name)
+    
 
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     # --- Define Helper functions ---
@@ -91,6 +112,7 @@ def feature_engineering(
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
     def engineer_features(df: pd.DataFrame) -> pd.DataFrame:
+        
         '''
         Docstring for engineer_features
         
@@ -155,7 +177,9 @@ def feature_engineering(
         df['avg_spend_user'] = (
             df
             .groupby('user_id')['amount']
-            .transform(lambda x: x.shift(1).expanding().mean())
+            .transform(
+                lambda x: x.shift(1).expanding().mean()
+            )
         )
         
         # Calculate amount ratio to average spend
@@ -228,7 +252,11 @@ def feature_engineering(
                 'tx_id',
                 'prev_lat',
                 'prev_lon',
-                'prev_ts'
+                'prev_ts',
+                'timestamp',
+                'user_id',
+                'device_id',
+                'ip_address'
             ]
         )
 
@@ -249,41 +277,31 @@ def feature_engineering(
 
     df_features = engineer_features(df)
 
-    # Extract version number from file name for saving
-    file_text = input_path
-    curr_ver = __import__('re').search(r'_seed_(\d+)', file_text).group(1)
+       
+    
+    # Save to CSV
+    df_features.to_csv(OUTPUT_PATH, index=False)
 
-    if save:
-        
-        output_dir = Path(__file__).resolve().parents[1] / Path("artifacts/features")
-        output_dir.mkdir(parents=True, exist_ok=True)
-        output_path = output_dir / f"fraud_features_seed_{curr_ver}.csv"
-        
-        
-        # Save to CSV
-        df_features.to_csv(output_path, index=False)
+    # Print the file Path
+    print('=' * 70)
 
-        # Print the file Path
-        print(f"File saved to {output_path}")
+    # Print the name of the csv file
+    print(f"Name of the csv file: 'fraud_features_seed_{curr_ver}.csv'")
+    
+    print()
+    
+    # Print the csv file location
+    print(f"Saved at: {OUTPUT_PATH}")
+
+    print()
+    
+    # Print the number of rows and columns after feature engineering
+    print(f"No of rows: {df_features.shape[0]}")
+    print(f"No of columns: {df_features.shape[1]}")
+    
+    print('=' * 70)
 
     return df_features
 
-
-# ===========================================================================================
-# --- Main Execution ---
-# ===========================================================================================
-
-if __name__ == "__main__":
-
-    print("=" * 70)
-    print("Performing feature engineering...")
-    print("=" * 70)
-    print()
-    
-    feature_engineering()
-
-    print("\n" + "=" * 70)
-    print("Feature engineering successfully completed!!!")
-    print("=" * 70)
 
 

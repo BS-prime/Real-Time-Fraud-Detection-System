@@ -2,7 +2,6 @@
 # --- Import Libraries ---
 # ============================================================================
 
-import os
 import pandas as pd
 import numpy as np
 import random
@@ -34,14 +33,22 @@ AUTH_METHODS = ["PIN", "Biometric", "Password"]
 # ============================================================================
 
 def generate_transactions_data(
-    n_tx: int | None = 10_000,
-    n_users: int | None = 500,
-    seed: int | None = 42,
-    save: bool | None = True
-):
+        n_tx: int | None = 10_000,
+        n_users: int | None = 500,
+        seed: int | None = 42
+    )-> pd.DataFrame:
     
     '''
-    Generate synthetic transaction data for fraud detection.
+    Docstring for generate_transactions_data
+    
+    :param n_tx: Number of transactions to generate
+    :type n_tx: int | None
+    :param n_users: Number of users to generate profiles for
+    :type n_users: int | None
+    :param seed: Random seed for reproducibility
+    :type seed: int | None
+    :return: Generated synthetic transaction data
+    :rtype: DataFrame
     '''
     
     if seed is not None:
@@ -55,6 +62,17 @@ def generate_transactions_data(
     
 
 
+    # ============================================================================
+    # --- Create Output Directory ---
+    # ============================================================================
+
+    # Create a output path
+    OUTPUT_DIR = Path(__file__).resolve().parents[2] / "data" / "simulated"
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    OUTPUT_PATH = OUTPUT_DIR / f"simulated_transactions_seed_{seed}.csv"
+
+    
+    
     # ============================================================================
     # --- Define the user profiles ---
     # ============================================================================
@@ -210,39 +228,28 @@ def generate_transactions_data(
     # ===========================================================================================    
     
     df = generate_data(n_tx, n_users)
-
-    if save:
-
-        output_dir = Path(__file__).resolve().parents[1] / "artifacts" / "data"
-        output_dir.mkdir(parents=True, exist_ok=True)
-        output_path = output_dir / f"simulated_transactions_seed_{seed}.csv"
-              
             
-        # Save to CSV
-        df.to_csv(output_path, index=False)
+    # Save to CSV
+    df.to_csv(OUTPUT_PATH, index=False)
 
-        # Return path info
-        print(f"Data saved to {output_path}")
-        
-    print(f"Generated {len(df)} transactions.\n \
-          Fraud rate: {df.is_fraud.mean():.2%}")
+    
+    print("=" * 70)
+    
+    # Print the csv filename
+    print(f"Name of the csv file: 'simulated_transactions_seed_{seed}.csv'")
+
+    print()
+    
+    # Print the output path
+    print(f"Data saved to: {OUTPUT_PATH}") 
+
+    print()
+
+    # Print some info about the data    
+    print(f"Generated {len(df)} transactions.")
+    print(f"Fraud rate: {df.is_fraud.mean():.2%}")       
+    
+    print("=" * 70)
     
     return df
 
-
-
-# ============================================================================================
-# --- Main Execution ---
-# ============================================================================================
-if __name__ == "__main__":
-
-    print('=' * 70)
-    print("Generating synthetic transaction data...")
-    print('=' * 70)
-    print()
-    # Generate and save data
-    generate_transactions_data()
-    
-    print("\n" + "=" * 70)
-    print("GENERATION COMPLETE!!!")
-    print("=" * 70)

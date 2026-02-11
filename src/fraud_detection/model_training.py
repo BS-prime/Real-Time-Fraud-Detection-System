@@ -2,46 +2,56 @@
 # --- Import Libraries ---
 # ==========================================================================
 
+import pandas as pd
+
 import re
+import yaml
+import joblib
 from pathlib import Path
 
-import joblib
-import numpy as np
-import pandas as pd
-import yaml
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import train_test_split, GridSearchCV
-from xgboost import XGBClassifier
+
+import xgboost as xgb
+from sklearn.linear_model import LogisticRegression
+from sklearn.ensemble import RandomForestClassifier
+
 
 
 # =========================================================================================
 # --- Define the actual function ---
 # =========================================================================================
 def model_trainer(
-        data_path: str | None = 'artifacts/data/simulated_transactions_seed_42.csv'        
-):
-    
+        csv_name: str | None = 'fraud_features_seed_42.csv'        
+    ) -> tuple:
+
     '''
     Docstring for model_trainer
     
-    :param data_path: Just give the path from the root directory
-    :type data_path: str | None
+    :param csv_name: Just put the name of the csv file that is generated from 
+    the feature engineering step, it should be in the format 
+    'fraud_features_seed_XX.csv' where XX is the seed number 
+    used in data generation. The csv file should be located in 
+    data/features folder.
+    
+    :type csv_name: str | None
     '''
+    
 
 
     # ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-    # --- Path ---
+    # --- Path Declaration ---
     # ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
-    # Get the csv
-    ROOT_DIR = Path(__file__).resolve().parents[1]
-    PATH_DIR = ROOT_DIR / Path(data_path)
+    # Get the csv                    
+    ROOT_DIR = Path(__file__).resolve().parents[2]
+    PATH_DIR = ROOT_DIR / "data" / "features" / csv_name
 
     # Trained model output path
-    OUTPUT_DIR = ROOT_DIR / Path('artifacts/model')
+    OUTPUT_DIR = ROOT_DIR / "artifacts" / "models"
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
+    # Path to the yaml
+    CONFIG_PATH = ROOT_DIR / "configs" / "config.yaml"
 
 
 
@@ -62,13 +72,16 @@ def model_trainer(
     # ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     # --- 1. Load Config & Extract Seed number ---
     # ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-    # 
-    with open("config.yaml", "r") as f:
+    
+    # Read the config file
+    with open(CONFIG_PATH, "r") as f:
         config = yaml.safe_load(f)
 
-    data_path = 'artifacts/data/simulated_transactions_seed_42.csv'
-    seed_val = int(re.search(r'_seed_(\d+)', data_path).group(1))
+    # Extract the seed number from the csv file
+    seed_val = int(re.search(r'_seed_(\d+)', csv_name).group(1))
 
+    
+    
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     # --- 2. Map String names to actual Scikit-Learn Classes ---
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
@@ -76,18 +89,18 @@ def model_trainer(
     algo_map = {
         "RandomForestClassifier": RandomForestClassifier,
         "LogisticRegression": LogisticRegression,
-        "XGBClassifier" : XGBClassifier
+        "XGBClassifier" : xgb.XGBClassifier
     }
 
 
 
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-    # --- 3. Data Setup (Placeholder for your loading logic) ---
+    # --- 3. Data Setup ---
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     
     X_train, X_test, y_train, y_test = train_test_split(
-        X , 
-        y , 
+        X, 
+        y, 
         test_size = 0.2, 
         stratify= y, 
         random_state=42
@@ -110,25 +123,28 @@ def model_trainer(
         grid = GridSearchCV(
             base_model, 
             settings['params'], 
-            cv=5, 
-            scoring='accuracy'
+            cv=4, 
+            scoring='average_precision'
         )
         
+        # Train the model 
         grid.fit(X_train, y_train)
-        
         
         # Get the best model
         best_model = grid.best_estimator_
 
-        # Name the model with algo name and data seed
-        save_path = OUTPUT_DIR /f"{model_id}_seed_{seed_val}.json"
+        # Saving the model with a unique name
+        save_path = OUTPUT_DIR / f"{model_id}_seed_{seed_val}.json"
 
         # Save the model
-        best_model.save_model(best_model, save_path)
-        
-        
-        print(
-            f"Best Score: {grid.best_score_:.4f} | Saved to: {save_path}"
-        )
-    
-    return X_train, X_test, y_train, y_test , save_path
+        if settings['type'] == "XGBClassifier":
+            best_model.save_model(str(save_path))
+        else:
+            joblib.dump(best_model, save_path)
+
+        print("=" * 70)
+        print(f"Model Name: '{model_id}_seed_{seed_val}.json'")
+        print(f"Best Score: {grid.best_score_:.4f} | Saved to: {OUTPUT_DIR}")
+        print("=" * 70)
+
+    return X_test ,y_test
