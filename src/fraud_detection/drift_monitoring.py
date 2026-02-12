@@ -6,6 +6,7 @@ import joblib
 import pandas as pd
 from datetime import datetime, timezone
 from pathlib import Path
+import re
 
 import xgboost as xgb
 
@@ -16,6 +17,7 @@ from evidently.metric_preset import (
     DataQualityPreset,
     TargetDriftPreset,
 )
+from .feature_engineering import feature_engineering
 
 
 # ======================================================================================
@@ -29,6 +31,81 @@ def generate_monitoring_report(
     new_dataset: str,
     drift_fail_threshold: float | None = 0.5,
 ):
+    
+    '''
+    Docstring for generate_monitoring_report
+    
+    :param model_name: Just pick a model for which you want check drift
+    :type model_name: str
+    :param trained_dataset: The dataset in which current model is trained on
+    :type trained_dataset: str
+    :param new_dataset: The new dataset
+    :type new_dataset: str
+    :param drift_fail_threshold: Just a number
+    :type drift_fail_threshold: float | None
+    '''
+    
+    # ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+    # --- Defining some helper functions ---
+    # ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+    def _seed_from_name(name: str) -> str | None:
+        match = re.search(r"_seed_(\d+)", name)
+        return match.group(1) if match else None
+
+    # This function check for the new dat
+    def _load_model_ready_dataset(dataset_name: str, project_root: Path) -> pd.DataFrame:
+        # User might pass a pre-engineered file directly.
+        feature_path = project_root / "data" / "features" / dataset_name
+        if feature_path.exists():
+            return pd.read_csv(feature_path)
+
+        # If a simulated file is passed, first try corresponding engineered file.
+        seed = _seed_from_name(dataset_name)
+        if seed:
+            derived_name = f"fraud_features_seed_{seed}.csv"
+            derived_path = project_root / "data" / "features" / derived_name
+            if derived_path.exists():
+                return pd.read_csv(derived_path)
+
+        # Fallback: engineer features from raw simulated data.
+        simulated_path = project_root / "data" / "simulated" / dataset_name
+        if simulated_path.exists():
+            return feature_engineering(dataset_name)
+
+        raise FileNotFoundError(
+            f"Could not find '{dataset_name}' in data/features or data/simulated."
+        )
+
+    def _model_feature_names(model) -> list[str] | None:
+        if hasattr(model, "feature_names_in_"):
+            return [str(col) for col in model.feature_names_in_]
+        if isinstance(model, xgb.Booster) and model.feature_names:
+            return [str(col) for col in model.feature_names]
+        return None
+
+    def _align_features_to_model(X: pd.DataFrame, model) -> pd.DataFrame:
+        expected = _model_feature_names(model)
+        X = X.copy()
+        X.columns = X.columns.astype(str)
+
+        if not expected:
+            return X
+
+        for col in expected:
+            if col not in X.columns:
+                X[col] = 0
+
+        return X.reindex(columns=expected, fill_value=0)
+
+    # Add a model-agnostic prediction helper
+    def _predict_scores(model, X: pd.DataFrame):
+        if hasattr(model, "predict_proba"):
+            return model.predict_proba(X)[:, 1]
+        if isinstance(model, xgb.Booster):
+            return model.predict(xgb.DMatrix(X))
+        return model.predict(X)
+
     # ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     # --- 0. Defining path ---
     # ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
@@ -39,10 +116,6 @@ def generate_monitoring_report(
     # Create the output directory
     REPORTS_DIR = PROJECT_ROOT / "reports" / "drift_monitoring"
     REPORTS_DIR.mkdir(parents=True, exist_ok=True)
-
-    # Locate the csv files
-    CURRENT_PATH = PROJECT_ROOT / "data" / "simulated" / new_dataset
-    REFERENCE_PATH = PROJECT_ROOT / "data" / "simulated" / trained_dataset
 
     # Model Path
     MODEL_PATH = PROJECT_ROOT / "artifacts" / "models" / model_name
@@ -58,27 +131,29 @@ def generate_monitoring_report(
     # --- 1. Normalize inputs ---
     # ==================================================================================
 
-    # Put the csv files into DataFrames
-    df_current = pd.read_csv(CURRENT_PATH)
-    df_reference = pd.read_csv(REFERENCE_PATH)
+    # Load model-ready datasets.
+    df_reference = _load_model_ready_dataset(trained_dataset, PROJECT_ROOT)
+    df_current = _load_model_ready_dataset(new_dataset, PROJECT_ROOT)
 
     # Selecting the features
-    X_train = df_current.drop(columns=["is_fraud"])
-    X_test = df_reference.drop(columns=["is_fraud"])
+    X_reference = df_reference.drop(columns=["is_fraud"])
+    X_current = df_current.drop(columns=["is_fraud"])
 
     # Selecting the target
-    y_train = df_current["is_fraud"]
-    y_test = df_reference["is_fraud"]
+    y_reference = df_reference["is_fraud"]
+    y_current = df_current["is_fraud"]
 
     # Get the column names
-    X_train.columns = X_train.columns.astype(str)
-    X_test.columns = X_test.columns.astype(str)
+    X_reference.columns = X_reference.columns.astype(str)
+    X_current.columns = X_current.columns.astype(str)
+    X_reference = _align_features_to_model(X_reference, model)
+    X_current = _align_features_to_model(X_current, model)
 
     # Separating the numerical and categorical features
-    numerical_features = X_train.select_dtypes(
+    numerical_features = X_reference.select_dtypes(
         include=["int64", "float64"]
     ).columns.tolist()
-    categorical_features = X_train.select_dtypes(
+    categorical_features = X_reference.select_dtypes(
         include=["object", "category", "bool"]
     ).columns.tolist()
 
@@ -87,8 +162,8 @@ def generate_monitoring_report(
     # ==================================================================================
 
     # Copy the features to a new DataFrame
-    reference = X_train.copy()
-    current = X_test.copy()
+    reference = X_reference.copy()
+    current = X_current.copy()
 
     # Create empty columns for target and prediction
     target_col = "__target__"
@@ -96,15 +171,11 @@ def generate_monitoring_report(
 
     # Fill the empty columns
     if target_col:
-        reference[target_col] = y_train.values
-        current[target_col] = y_test.values
+        reference[target_col] = y_reference.values
+        current[target_col] = y_current.values
 
-    if hasattr(model, "predict_proba"):
-        reference[prediction_col] = model.predict_proba(X_train)[:, 1]
-        current[prediction_col] = model.predict_proba(X_test)[:, 1]
-    else:
-        reference[prediction_col] = model.predict(X_train)
-        current[prediction_col] = model.predict(X_test)
+    reference[prediction_col] = _predict_scores(model, X_reference)
+    current[prediction_col] = _predict_scores(model, X_current)
 
     # ==================================================================================
     # --- 3. Column mapping ---
@@ -143,10 +214,10 @@ def generate_monitoring_report(
     # ==================================================================================
 
     # Preserving version names for clearity
-    ref_ver = Path(REFERENCE_PATH).stem
+    ref_ver = Path(trained_dataset).stem
 
     # Same thing for current
-    curr_ver = Path(CURRENT_PATH).stem
+    curr_ver = Path(new_dataset).stem
 
     # Define the report path with timestamps
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")

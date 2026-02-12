@@ -64,10 +64,10 @@ def feature_engineering(
         """
         Docstring for haversine
 
-        :param lat1: Lattitude of first coordinate in degrees
+        :param lat1: Latitude of first coordinate in degrees
         :param lon1: Longitude of first coordinate in degrees
-        :param lat2: Lattitude of second coordinate in degress
-        :param lon2: Longitude of second coordinate in degress
+        :param lat2: Latitude of second coordinate in degrees
+        :param lon2: Longitude of second coordinate in degrees
         """
 
         """
