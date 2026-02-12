@@ -20,7 +20,10 @@ The system exposes a low-latency FastAPI inference service (\<15ms)
 capable of transforming raw transactions into explainable, actionable
 fraud decisions.
 
-This project implements an end-to-end machine learning pipeline consisting of data generation, feature engineering, model training, cost-aware threshold optimization, and deployment via a real-time FastAPI inference service.
+This project implements an end-to-end machine learning pipeline 
+consisting of data generation, feature engineering, model training, 
+cost-aware threshold optimization, and deployment via a real-time FastAPI 
+inference service.
 
 This project focuses on deployment realism, decision clarity, and model
 transparency---not just model accuracy.
@@ -32,13 +35,13 @@ transparency---not just model accuracy.
 Pull the prebuilt image from Docker Hub:
 
 ``` bash
-docker pull bhargav/fraud-guard:1.0
+docker pull bsprime777/fraud-guard-v:1.1.0
 ```
 
 Run the container:
 
 ``` bash
-docker run -p 8000:8000 bhargav/fraud-guard:1.0
+docker run -p 8000:8000 bsprime777/fraud-guard-v:1.1.0
 ```
 
 Access API documentation:
