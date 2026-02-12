@@ -2,7 +2,7 @@
 
 # Data
 from .data_ingestion import generate_transactions_data
-from .feature_engineering import feature_engineering
+from .feature_engineering import feature_engineer
 
 # Model
 from .model_training import model_trainer
@@ -22,7 +22,7 @@ someone use
 
 __all__ = [
     "generate_transactions_data",
-    "feature_engineering",
+    "feature_engineer",
     "model_trainer",
     "generate_monitoring_report",
     "threshold_optimizer",

@@ -1,14 +1,46 @@
-.venv/
-.idea/
-__pycache__/
-.ipynb_checkpoints/
-*.pyc
-.env
-venv
-.vscode
+# OS and editors
 .DS_Store
-fraud_detection.egg-info/
-reports
-data
-artifacts
-streamlit_app.py
+.vscode/
+.idea/
+
+# Python caches and artifacts
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# Packaging/build
+build/
+dist/
+*.egg-info/
+.eggs/
+pip-wheel-metadata/
+
+# Virtual environments and local env files
+.venv/
+venv/
+env/
+.env
+.env.*
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Logs
+*.log
+
+# Project-generated outputs
+data/simulated/
+data/features/
+artifacts/models/
+artifacts/model_thresholds/
+reports/model_evaluation/
+reports/drift_monitoring/
+reports/shap/

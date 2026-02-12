@@ -1,10 +1,42 @@
+# VCS
+.git/
+.gitignore
+
+# Local environments and secrets
 .venv/
-.idea/
-__pycache__/
-.ipynb_checkpoints/
-*.pyc
+venv/
+env/
 .env
-venv
-drift_monitoring/
+.env.*
+
+# Python caches and tooling outputs
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+.coverage
+.coverage.*
+htmlcov/
+
+# Build/packaging artifacts
+build/
+dist/
+*.egg-info/
+.eggs/
+pip-wheel-metadata/
+
+# Editors and OS files
+.idea/
 .vscode/
+.DS_Store
+
+# Dev-only project directories
+tests/
+notebooks/
 reports/
+data/
+
+# Misc
+*.log
