@@ -2,13 +2,13 @@
 # --- Import Libraries ---
 # ============================================================================
 
-import pandas as pd
-import numpy as np
 import random
-from faker import Faker
 from datetime import timedelta
 from pathlib import Path
 
+import numpy as np
+import pandas as pd
+from faker import Faker
 
 # ============================================================================
 # --- Configurations ---
@@ -58,7 +58,7 @@ def generate_transactions_data(
     # --- Create Output Directory ---
     # ============================================================================
 
-    # Create a output path
+    # Create an output path
     OUTPUT_DIR = Path(__file__).resolve().parents[2] / "data" / "simulated"
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     OUTPUT_PATH = OUTPUT_DIR / f"simulated_transactions_seed_{seed}.csv"
@@ -94,7 +94,7 @@ def generate_transactions_data(
         return users
 
     # ============================================================================
-    # --- Genrerate Transactions ---
+    # --- Generate Transactions ---
     # ============================================================================
 
     def generate_data(n_tx, n_users) -> pd.DataFrame:
