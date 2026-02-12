@@ -1,52 +1,252 @@
-# 🛡️ Real-Time Fraud Guard 2026
+# 🛡️ Fraud Guard 2026
 
-**An End-to-End MLOps Pipeline for Geospatial & Behavioral Anomaly Detection**
+### Real-Time Fraud Detection Pipeline with Geospatial Intelligence and Behavioral Profiling
 
-![Build Status](https://img.shields.io/badge/Build-Passing-brightgreen)
-![Python](https://img.shields.io/badge/Python-3.12-blue)
-![Framework](https://img.shields.io/badge/Framework-FastAPI-009688)
+![Build Status](https://img.shields.io/badge/build-passing-brightgreen)
+![Python](https://img.shields.io/badge/python-3.12-blue)
+![API](https://img.shields.io/badge/API-FastAPI-009688)
+![Model](https://img.shields.io/badge/model-XGBoost-orange)
+![Container](https://img.shields.io/badge/container-Docker-2496ED)
 
-## 📌 Project Overview
+------------------------------------------------------------------------
 
-In 2026, static fraud rules are obsolete. This project implements a high-performance Machine Learning service designed to detect fraudulent transactions using **Geospatial Velocity** and **Behavioral Profiling**. It moves beyond "Black Box" AI by integrating **SHAP explainability** and **real-time drift monitoring**.
+## Overview
 
-### 🚀 Key Engineering Solutions
+Fraud Guard 2026 is a production-style, real-time fraud detection system
+designed to detect anomalous financial transactions using geospatial
+physics, behavioral baselines, and cost-sensitive machine learning.
 
-- **The Impossible Traveler Logic:** Developed a custom feature to detect transactions that exceed physical travel limits using the Haversine formula.
-- **Cost-Sensitive Learning:** Leveraged XGBoost's `scale_pos_weight` to address a 98% class imbalance, prioritizing **Recall (100%)** over simple Accuracy.
-- **Explainable AI (XAI):** Integrated SHAP into the inference pipeline to provide "Reason Codes" for every blocked transaction, satisfying financial regulatory requirements.
-- **Business-Cost-Aware-Threshold:** The decision threshold is optimized to minimize financial loss, explicitly prioritizing the reduction of costly false positives.
-- **Production Architecture:** Containerized via Docker with a FastAPI gateway capable of **<15ms inference latency**.
+The system exposes a low-latency FastAPI inference service (\<15ms)
+capable of transforming raw transactions into explainable, actionable
+fraud decisions.
 
----
+This project implements an end-to-end machine learning pipeline consisting of data generation, feature engineering, model training, cost-aware threshold optimization, and deployment via a real-time FastAPI inference service.
 
-## 🏗️ Tech Stack
+This project focuses on deployment realism, decision clarity, and model
+transparency---not just model accuracy.
 
-- **Modeling:** XGBoost, Scikit-Learn
-- **Explainability:** SHAP
-- **API Layer:** FastAPI, Pydantic V2, Uvicorn
-- **Containerization:** Docker (Slim-image optimization)
-- **Observability:** Evidently AI (Data & Concept Drift)
+------------------------------------------------------------------------
 
----
+## Run Instantly Using Docker (Recommended)
 
-## 📊 Core Feature: Geospatial Velocity
+Pull the prebuilt image from Docker Hub:
 
+``` bash
+docker pull bhargav/fraud-guard:1.0
+```
+
+Run the container:
+
+``` bash
+docker run -p 8000:8000 bhargav/fraud-guard:1.0
+```
+
+Access API documentation:
+
+    http://localhost:8000/docs
+
+Health check:
+
+    http://localhost:8000/
+
+This runs the exact production inference environment with no setup
+required.
+
+------------------------------------------------------------------------
+## Running the pipeline (Jupyter Notebook)
+
+``` bash
+from fraud_detection import (
+    generate_transactions_data,
+    feature_engineer,
+    model_trainer,
+    threshold_optimizer,
+    model_evaluator,
+)
+
+seed = 42
+model_name = "xgboost_seed_42.json"
+
+generate_transactions_data(seed=seed)
+feature_engineer(f"simulated_transactions_seed_{seed}.csv")
+
+X_test, y_test = model_trainer(f"fraud_features_seed_{seed}.csv")
+
+y_prob, y_pred = threshold_optimizer(
+    X_test,
+    y_test,
+    model_name=model_name
+)
+
+model_evaluator(
+    model_name,
+    X_test,
+    y_test,
+    y_prob,
+    y_pred
+)
+```
+------------------------------------------------------------------------
+
+## Core Capabilities
+
+### 📊 Core Feature: Geospatial Velocity
 To identify fraud, the system calculates the physical distance between consecutive transactions using:
 
 $$\text{dist} = 2r \arcsin\left(\sqrt{\sin^2\left(\frac{\phi_2-\phi_1}{2}\right) + \cos(\phi_1)\cos(\phi_2)\sin^2\left(\frac{\lambda_2-\lambda_1}{2}\right)}\right)$$
 
 If the velocity ($\text{dist} / \text{time}$) exceeds a commercial flight threshold (e.g., 900 km/h), the risk score is automatically elevated.
 
----
+------------------------------------------------------------------------
 
-## 🛠️ Installation & Deployment
+### Behavioral Anomaly Detection
 
-### 1. Build the Docker Container
+Evaluates transactions relative to behavioral baselines:
 
-```bash
-docker build -t fraud-guard-2026 .
+-   amount_ratio
+-   tx_count_24h
+-   travel_velocity_kmph
+-   authentication method
+-   category anomalies
 
-### 2. Run the Docker image
-```bash 
-docker run -p 8000:8000 fraud-detection-api
+------------------------------------------------------------------------
+
+### Cost-Sensitive Machine Learning
+
+Optimized for minimizing financial loss using:
+
+-   XGBoost with imbalance weighting
+-   Explicit business-cost threshold optimization
+
+------------------------------------------------------------------------
+
+### High-Performance Inference
+
+Uses native XGBoost Booster interface:
+
+-   Direct C++ execution
+-   Minimal latency
+-   JSON-based model loading
+-   No sklearn runtime overhead
+
+------------------------------------------------------------------------
+
+### Decision Layer
+
+Separates prediction from business action.
+
+Example response:
+
+``` json
+{
+  "model_version": "fraud_xgb_v1.0",
+  "fraud_probability": 0.9718,
+  "risk_band": "VERY_HIGH",
+  "recommended_action": "BLOCK",
+  "decision_reasons": [
+    "Transaction amount significantly higher than user's normal spending",
+    "Transaction location implies unrealistic travel speed",
+    "Unusually high number of transactions in past 24 hours"
+  ],
+  "fallbacks_used": []
+}
+```
+
+------------------------------------------------------------------------
+
+### Explainability (Offline Validation)
+
+SHAP was used during evaluation to validate learned feature importance.
+
+Confirmed top fraud signals:
+
+-   amount_ratio
+-   travel_velocity_kmph
+-   tx_count_24h
+
+Plots available in:
+
+    reports/shap/
+
+------------------------------------------------------------------------
+
+### Drift Monitoring
+
+Monitors:
+
+-   Feature distribution drift
+-   Data quality degradation
+-   Concept drift
+
+Using Evidently AI.
+
+------------------------------------------------------------------------
+
+## System Architecture
+
+    Transaction Input
+          │
+          ▼
+    Feature Engineering
+          │
+          ▼
+    XGBoost Booster (C++ inference)
+          │
+          ▼
+    Decision Layer
+          │
+          ├── Risk Band
+          ├── Recommended Action
+          ├── Decision Reasons
+          └── Fallback Transparency
+          │
+          ▼
+    FastAPI Response (<15 ms)
+
+------------------------------------------------------------------------
+
+## Tech Stack
+
+Modeling: - XGBoost - Scikit-Learn
+
+API: - FastAPI - Pydantic v2 - Uvicorn
+
+Explainability (offline): - SHAP
+
+Monitoring: - Evidently AI
+
+Containerization: - Docker
+
+------------------------------------------------------------------------
+
+## Local Development
+
+Run locally:
+
+``` bash
+uvicorn src.api.main:app --host 0.0.0.0 --port 8000
+```
+
+------------------------------------------------------------------------
+
+## Testing
+
+Run:
+
+``` bash
+pytest -q
+```
+
+------------------------------------------------------------------------
+
+## Project Focus
+
+Demonstrates:
+
+-   Real-time ML inference deployment
+-   Cost-aware fraud decision systems
+-   Explainable ML validation
+-   Production-grade API design
+-   Containerized deployment
+
+------------------------------------------------------------------------

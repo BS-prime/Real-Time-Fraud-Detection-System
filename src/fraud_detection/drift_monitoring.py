@@ -17,7 +17,7 @@ from evidently.metric_preset import (
     DataQualityPreset,
     TargetDriftPreset,
 )
-from .feature_engineering import feature_engineering
+from .feature_engineering import feature_engineer
 
 
 # ======================================================================================
@@ -31,10 +31,9 @@ def generate_monitoring_report(
     new_dataset: str,
     drift_fail_threshold: float | None = 0.5,
 ):
-    
-    '''
+    """
     Docstring for generate_monitoring_report
-    
+
     :param model_name: Just pick a model for which you want check drift
     :type model_name: str
     :param trained_dataset: The dataset in which current model is trained on
@@ -43,8 +42,8 @@ def generate_monitoring_report(
     :type new_dataset: str
     :param drift_fail_threshold: Just a number
     :type drift_fail_threshold: float | None
-    '''
-    
+    """
+
     # ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     # --- Defining some helper functions ---
     # ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
@@ -53,14 +52,16 @@ def generate_monitoring_report(
         match = re.search(r"_seed_(\d+)", name)
         return match.group(1) if match else None
 
-    # This function check for the new dat
-    def _load_model_ready_dataset(dataset_name: str, project_root: Path) -> pd.DataFrame:
-        # User might pass a pre-engineered file directly.
+    # This function load dataset correspoding to the user input
+    def _load_model_ready_dataset(
+        dataset_name: str, project_root: Path
+    ) -> pd.DataFrame:
+        # If you put a pre-engineered file directly.
         feature_path = project_root / "data" / "features" / dataset_name
         if feature_path.exists():
             return pd.read_csv(feature_path)
 
-        # If a simulated file is passed, first try corresponding engineered file.
+        # If you put a simulated file, let's try to find corresponding engineered file.
         seed = _seed_from_name(dataset_name)
         if seed:
             derived_name = f"fraud_features_seed_{seed}.csv"
@@ -68,10 +69,10 @@ def generate_monitoring_report(
             if derived_path.exists():
                 return pd.read_csv(derived_path)
 
-        # Fallback: engineer features from raw simulated data.
+        # Fallback: Perform feauture engineering
         simulated_path = project_root / "data" / "simulated" / dataset_name
         if simulated_path.exists():
-            return feature_engineering(dataset_name)
+            return feature_engineer(dataset_name)
 
         raise FileNotFoundError(
             f"Could not find '{dataset_name}' in data/features or data/simulated."
@@ -98,7 +99,7 @@ def generate_monitoring_report(
 
         return X.reindex(columns=expected, fill_value=0)
 
-    # Add a model-agnostic prediction helper
+    # Different predict function for different models
     def _predict_scores(model, X: pd.DataFrame):
         if hasattr(model, "predict_proba"):
             return model.predict_proba(X)[:, 1]

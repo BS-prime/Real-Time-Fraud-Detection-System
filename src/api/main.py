@@ -6,7 +6,6 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 from typing import Literal
 import json
-import joblib
 import xgboost as xgb
 import numpy as np
 from pathlib import Path
@@ -18,9 +17,9 @@ from datetime import datetime
 # --- Model loading (fail fast) ---
 # ==============================================================================
 
-PATH = Path("artifacts/model")
+MODEL_PATH = Path("artifacts/models")
 
-MODEL_FILE = PATH / "xgboost_seed_42.json"
+MODEL_FILE = MODEL_PATH / "xgboost_seed_42.json"
 
 if not MODEL_FILE.exists():
     raise RuntimeError("Model file not found")
@@ -28,7 +27,7 @@ if not MODEL_FILE.exists():
 model = xgb.Booster()
 model.load_model(str(MODEL_FILE))
 
-MODEL_VERSION = "fraud_xgb_v1.0"
+MODEL_VERSION = "XGBoost_v:1.0"
 
 
 
@@ -36,10 +35,13 @@ MODEL_VERSION = "fraud_xgb_v1.0"
 # --- Load optimal threshold ---
 # ==============================================================================
 
-if not (PATH / "optimal_threshold.json").exists():
+THRESHOLD_PATH = Path(
+    "artifacts/model_thresholds/optimal_threshold_xgboost_seed_42.json"
+)
+if not (THRESHOLD_PATH).exists():
     raise RuntimeError("Threshold file not found")
 
-with open(PATH / "optimal_threshold.json") as f:
+with open(THRESHOLD_PATH) as f:
     THRESHOLD = json.load(f)["best_threshold"]
 
 
@@ -48,7 +50,7 @@ with open(PATH / "optimal_threshold.json") as f:
 # --- Constants ---
 # ==============================================================================
 
-# feature columns must match training
+# Define all the features for further use
 FEATURE_COLUMNS = [
     'amount',  
     'lat', 
@@ -103,7 +105,7 @@ class Transaction(BaseModel):
 # Mock feature store
 # ==============================================================================
 
-# since we don't have a real feature store, we'll mock user historical data
+# since we don't have a real feature store, we'll use mock user historical data
 # In a real-world scenario, this would be fetched from a database or feature store
 user_history = {
     "USER_123": {
@@ -116,7 +118,7 @@ user_history = {
 
 
 # ==============================================================================
-# helper functions
+# --- helper functions ---
 # ==============================================================================
 
 def coord_delta(lat1, lon1, lat2, lon2) -> float:
@@ -137,7 +139,7 @@ hour = datetime.today().hour
 
 
 # ==============================================================================
-# --- Decision Logic Layer (Business Logic)
+# --- Decision Logic Layer (Business Logic) ---
 # ==============================================================================
 
 def get_risk_band(probability: float) -> str:
@@ -180,7 +182,7 @@ def get_decision_reasons(
     if tx_count_24h >= 20:
         reasons.append("Unusually high number of transactions in past 24 hours")
 
-    if amount_ratio >= 10 or travel_velocity_kmph >= 1500:
+    if amount_ratio >= 10 or travel_velocity_kmph >= 900: # commercial flight threshold (e.g., 900 km/h)
         reasons.append("Extreme deviation from user spending behavior")
 
     return reasons[:3]  # limit to top 3
@@ -224,6 +226,7 @@ async def predict_fraud(tx: Transaction):
     # --- fetch history ---
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
+    # Usually in real cases history get fetch from a real database
     history = user_history.get(
         tx.user_id,
         {
@@ -268,7 +271,7 @@ async def predict_fraud(tx: Transaction):
     time_delta = tx.time_delta_min or DEFAULT_TIME_DELTA_MIN
     
     # travel velocity in km/h
-    travel_velocity_kmph = dist_from_last_tx_km / (tx.time_delta_min / 60.0)
+    travel_velocity_kmph = dist_from_last_tx_km / (time_delta / 60.0)
     
     
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
@@ -380,4 +383,4 @@ if __name__ == "__main__":
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
 
 
-# Use this link to test the API once running: http://127.0.0.1:8000/docs
+# Use this link to test the API once running: http://localhost:8000/docs

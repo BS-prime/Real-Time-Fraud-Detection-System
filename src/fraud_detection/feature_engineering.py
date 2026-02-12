@@ -12,11 +12,11 @@ import numpy as np
 # =====================================================================================
 
 
-def feature_engineering(
+def feature_engineer(
     csv_name: str | None = "simulated_transactions_seed_42.csv",
 ) -> pd.DataFrame:
     """
-    Docstring for feature_engineering
+    Docstring for feature_engineer
 
     :param csv_name: Just put the name of the csv file that is generated from
     the data generation step, it should be in the format
