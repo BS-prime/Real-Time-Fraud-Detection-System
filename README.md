@@ -8,7 +8,7 @@
 ![Model](https://img.shields.io/badge/model-XGBoost-orange)
 ![Container](https://img.shields.io/badge/container-Docker-2496ED)
 
-------------------------------------------------------------------------
+------------------------------------------------------------------------------------
 
 ## Overview
 
@@ -25,10 +25,15 @@ consisting of data generation, feature engineering, model training,
 cost-aware threshold optimization, and deployment via a real-time FastAPI 
 inference service.
 
+The training process is orchestrated through a dedicated pipeline entry 
+point (run_training_pipeline) which executes data generation, 
+feature engineering, model training, threshold optimization, and evaluation 
+in a deterministic sequence.
+
 This project focuses on deployment realism, decision clarity, and model
 transparency---not just model accuracy.
 
-------------------------------------------------------------------------
+------------------------------------------------------------------------------------
 
 ## Run Instantly Using Docker (Recommended)
 
@@ -55,41 +60,12 @@ Health check:
 This runs the exact production inference environment with no setup
 required.
 
-------------------------------------------------------------------------
-## Running the pipeline (Jupyter Notebook)
+------------------------------------------------------------------------------------
+## Running the pipeline (Project Root terminal)
 
-``` bash
-from fraud_detection import (
-    generate_transactions_data,
-    feature_engineer,
-    model_trainer,
-    threshold_optimizer,
-    model_evaluator,
-)
-
-seed = 42
-model_name = "xgboost_seed_42.json"
-
-generate_transactions_data(seed=seed)
-feature_engineer(f"simulated_transactions_seed_{seed}.csv")
-
-X_test, y_test = model_trainer(f"fraud_features_seed_{seed}.csv")
-
-y_prob, y_pred = threshold_optimizer(
-    X_test,
-    y_test,
-    model_name=model_name
-)
-
-model_evaluator(
-    model_name,
-    X_test,
-    y_test,
-    y_prob,
-    y_pred
-)
+```bash
+python run_pipeline.py
 ```
-------------------------------------------------------------------------
 
 ## Core Capabilities
 
@@ -100,7 +76,7 @@ $$\text{dist} = 2r \arcsin\left(\sqrt{\sin^2\left(\frac{\phi_2-\phi_1}{2}\right)
 
 If the velocity ($\text{dist} / \text{time}$) exceeds a commercial flight threshold (e.g., 900 km/h), the risk score is automatically elevated.
 
-------------------------------------------------------------------------
+------------------------------------------------------------------------------------
 
 ### Behavioral Anomaly Detection
 
@@ -112,7 +88,7 @@ Evaluates transactions relative to behavioral baselines:
 -   authentication method
 -   category anomalies
 
-------------------------------------------------------------------------
+------------------------------------------------------------------------------------
 
 ### Cost-Sensitive Machine Learning
 
@@ -121,7 +97,7 @@ Optimized for minimizing financial loss using:
 -   XGBoost with imbalance weighting
 -   Explicit business-cost threshold optimization
 
-------------------------------------------------------------------------
+------------------------------------------------------------------------------------
 
 ### High-Performance Inference
 
@@ -132,7 +108,7 @@ Uses native XGBoost Booster interface:
 -   JSON-based model loading
 -   No sklearn runtime overhead
 
-------------------------------------------------------------------------
+------------------------------------------------------------------------------------
 
 ### Decision Layer
 
@@ -155,7 +131,7 @@ Example response:
 }
 ```
 
-------------------------------------------------------------------------
+------------------------------------------------------------------------------------
 
 ### Explainability (Offline Validation)
 
@@ -171,7 +147,7 @@ Plots available in:
 
     reports/shap/
 
-------------------------------------------------------------------------
+------------------------------------------------------------------------------------
 
 ### Drift Monitoring
 
@@ -183,7 +159,7 @@ Monitors:
 
 Using Evidently AI.
 
-------------------------------------------------------------------------
+------------------------------------------------------------------------------------
 
 ## System Architecture
 
@@ -206,7 +182,7 @@ Using Evidently AI.
           ▼
     FastAPI Response (<15 ms)
 
-------------------------------------------------------------------------
+------------------------------------------------------------------------------------
 
 ## Tech Stack
 
@@ -220,7 +196,7 @@ Monitoring: - Evidently AI
 
 Containerization: - Docker
 
-------------------------------------------------------------------------
+------------------------------------------------------------------------------------
 
 ## Local Development
 
@@ -230,7 +206,7 @@ Run locally:
 uvicorn src.api.main:app --host 0.0.0.0 --port 8000
 ```
 
-------------------------------------------------------------------------
+------------------------------------------------------------------------------------
 
 ## Testing
 
@@ -240,7 +216,7 @@ Run:
 pytest -q
 ```
 
-------------------------------------------------------------------------
+------------------------------------------------------------------------------------
 
 ## Project Focus
 
@@ -252,4 +228,4 @@ Demonstrates:
 -   Production-grade API design
 -   Containerized deployment
 
-------------------------------------------------------------------------
+------------------------------------------------------------------------------------
