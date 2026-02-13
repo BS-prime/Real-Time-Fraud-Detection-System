@@ -1,6 +1,6 @@
 # 🛡️ Fraud Guard 2026
 
-### Real-Time Fraud Detection Pipeline with Geospatial Intelligence and Behavioral Profiling
+## Real-Time Fraud Detection Pipeline with Geospatial Intelligence & Behavioral Profiling
 
 ![Build Status](https://img.shields.io/badge/build-passing-brightgreen)
 ![Python](https://img.shields.io/badge/python-3.12-blue)
@@ -8,34 +8,99 @@
 ![Model](https://img.shields.io/badge/model-XGBoost-orange)
 ![Container](https://img.shields.io/badge/container-Docker-2496ED)
 
-------------------------------------------------------------------------------------
+------------------------------------------------------------------------
 
-## Overview
+## 📌 Overview
 
-Fraud Guard 2026 is a production-style, real-time fraud detection system
-designed to detect anomalous financial transactions using geospatial
-physics, behavioral baselines, and cost-sensitive machine learning.
+Fraud Guard 2026 is a production-oriented real-time fraud detection
+system designed to identify anomalous financial transactions using
+geospatial physics, behavioral profiling, and cost-sensitive machine
+learning.
 
-The system exposes a low-latency FastAPI inference service (\<15ms)
-capable of transforming raw transactions into explainable, actionable
-fraud decisions.
+This project demonstrates the full lifecycle of a deployable ML system,
+including:
 
-This project implements an end-to-end machine learning pipeline 
-consisting of data generation, feature engineering, model training, 
-cost-aware threshold optimization, and deployment via a real-time FastAPI 
-inference service.
+-   Deterministic training pipeline orchestration\
+-   Behavioral and geospatial feature engineering\
+-   Cost-aware threshold optimization\
+-   Low-latency FastAPI inference deployment\
+-   Containerized runtime via Docker\
+-   Explainable model validation using SHAP
 
-The training process is orchestrated through a dedicated pipeline entry 
-point (run_training_pipeline) which executes data generation, 
-feature engineering, model training, threshold optimization, and evaluation 
-in a deterministic sequence.
+The system exposes a FastAPI inference service capable of sub-15ms
+response time, converting raw transactions into explainable fraud
+decisions.
 
-This project focuses on deployment realism, decision clarity, and model
-transparency---not just model accuracy.
+------------------------------------------------------------------------
 
-------------------------------------------------------------------------------------
+## 🚀 Key Engineering Solutions
 
-## Run Instantly Using Docker (Recommended)
+### 🌍 Geospatial Velocity Detection ("Impossible Traveler")
+
+Implemented a physics-based anomaly signal using the Haversine formula
+to compute travel velocity between consecutive transactions.
+
+Detects fraud patterns such as credential theft, account takeover, and
+location spoofing.
+
+------------------------------------------------------------------------
+
+### ⚖️ Cost-Sensitive Fraud Optimization
+
+Handled extreme class imbalance (\~98% legitimate transactions) using:
+
+-   XGBoost scale_pos_weight
+-   Explicit decision threshold optimization
+
+Optimizes fraud detection based on financial loss trade-offs.
+
+------------------------------------------------------------------------
+
+### ⚡ High-Performance Native Inference Architecture
+
+Uses XGBoost's native Booster interface for:
+
+-   Direct execution in optimized C++ runtime\
+-   Lower latency and memory overhead\
+-   Deterministic JSON model loading
+
+Typical inference latency: \< 15 ms
+
+------------------------------------------------------------------------
+
+### 🧠 Behavioral Anomaly Feature Engineering
+
+Engineered deviation-based behavioral features:
+
+-   amount_ratio
+-   travel_velocity_kmph
+-   tx_count_24h
+
+------------------------------------------------------------------------
+
+### 🔍 Explainable Model Validation
+
+SHAP was used during evaluation to validate learned feature importance.
+
+Confirmed top fraud signals:
+
+-   amount_ratio
+-   travel_velocity_kmph
+-   tx_count_24h
+
+Plots available in:
+
+    reports/shap/
+
+------------------------------------------------------------------------
+
+### 📦 Containerized Deployment
+
+Docker enables reproducible, environment-independent deployment.
+
+------------------------------------------------------------------------
+
+## 🐳 Run Instantly Using Docker (Recommended)
 
 Pull the prebuilt image from Docker Hub:
 
@@ -60,57 +125,27 @@ Health check:
 This runs the exact production inference environment with no setup
 required.
 
-------------------------------------------------------------------------------------
-## Running the pipeline (Project Root terminal)
+------------------------------------------------------------------------
+
+## 🔁 Training Pipeline
 
 ```bash
 python run_pipeline.py
 ```
 
-## Core Capabilities
+Pipeline stages:
 
-### 📊 Core Feature: Geospatial Velocity
-To identify fraud, the system calculates the physical distance between consecutive transactions using:
+1.  Data generation\
+2.  Feature engineering\
+3.  Model training\
+4.  Threshold optimization\
+5.  Model evaluation
 
-$$\text{dist} = 2r \arcsin\left(\sqrt{\sin^2\left(\frac{\phi_2-\phi_1}{2}\right) + \cos(\phi_1)\cos(\phi_2)\sin^2\left(\frac{\lambda_2-\lambda_1}{2}\right)}\right)$$
+------------------------------------------------------------------------
 
-If the velocity ($\text{dist} / \text{time}$) exceeds a commercial flight threshold (e.g., 900 km/h), the risk score is automatically elevated.
+## 🧠 Decision Layer
 
-------------------------------------------------------------------------------------
-
-### Behavioral Anomaly Detection
-
-Evaluates transactions relative to behavioral baselines:
-
--   amount_ratio
--   tx_count_24h
--   travel_velocity_kmph
--   authentication method
--   category anomalies
-
-------------------------------------------------------------------------------------
-
-### Cost-Sensitive Machine Learning
-
-Optimized for minimizing financial loss using:
-
--   XGBoost with imbalance weighting
--   Explicit business-cost threshold optimization
-
-------------------------------------------------------------------------------------
-
-### High-Performance Inference
-
-Uses native XGBoost Booster interface:
-
--   Direct C++ execution
--   Minimal latency
--   JSON-based model loading
--   No sklearn runtime overhead
-
-------------------------------------------------------------------------------------
-
-### Decision Layer
+Example response:
 
 Separates prediction from business action.
 
@@ -130,95 +165,23 @@ Example response:
   "fallbacks_used": []
 }
 ```
+------------------------------------------------------------------------
 
-------------------------------------------------------------------------------------
+## 🧰 Tech Stack
 
-### Explainability (Offline Validation)
+Machine Learning: - XGBoost - Scikit-Learn
 
-SHAP was used during evaluation to validate learned feature importance.
+API: - FastAPI - Pydantic - Uvicorn
 
-Confirmed top fraud signals:
-
--   amount_ratio
--   travel_velocity_kmph
--   tx_count_24h
-
-Plots available in:
-
-    reports/shap/
-
-------------------------------------------------------------------------------------
-
-### Drift Monitoring
-
-Monitors:
-
--   Feature distribution drift
--   Data quality degradation
--   Concept drift
-
-Using Evidently AI.
-
-------------------------------------------------------------------------------------
-
-## System Architecture
-
-    Transaction Input
-          │
-          ▼
-    Feature Engineering
-          │
-          ▼
-    XGBoost Booster (C++ inference)
-          │
-          ▼
-    Decision Layer
-          │
-          ├── Risk Band
-          ├── Recommended Action
-          ├── Decision Reasons
-          └── Fallback Transparency
-          │
-          ▼
-    FastAPI Response (<15 ms)
-
-------------------------------------------------------------------------------------
-
-## Tech Stack
-
-Modeling: - XGBoost - Scikit-Learn
-
-API: - FastAPI - Pydantic v2 - Uvicorn
-
-Explainability (offline): - SHAP
+Explainability(Offline): - SHAP
 
 Monitoring: - Evidently AI
 
-Containerization: - Docker
+Deployment: - Docker
 
-------------------------------------------------------------------------------------
+------------------------------------------------------------------------
 
-## Local Development
-
-Run locally:
-
-``` bash
-uvicorn src.api.main:app --host 0.0.0.0 --port 8000
-```
-
-------------------------------------------------------------------------------------
-
-## Testing
-
-Run:
-
-``` bash
-pytest -q
-```
-
-------------------------------------------------------------------------------------
-
-## Project Focus
+## 🎯 Project Focus
 
 Demonstrates:
 
@@ -228,4 +191,4 @@ Demonstrates:
 -   Production-grade API design
 -   Containerized deployment
 
-------------------------------------------------------------------------------------
+------------------------------------------------------------------------
