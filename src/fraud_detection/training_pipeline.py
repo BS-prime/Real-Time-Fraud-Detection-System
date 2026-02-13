@@ -30,7 +30,7 @@ def run_training_pipeline(
     :type n_users: int | None
     :param seed: Reproducible seed for dataset
     :type seed: int | None
-    :param algo_name: Select the algo Example: "XGBoost" or "RandomForest".
+    :param algo_name: Select the algo Example: "xgboost" or "RandomForest".
     :type algo_name: str | None
     :return: Description
     :rtype: dict
@@ -53,9 +53,9 @@ def run_training_pipeline(
 
     start_time = datetime.now()
 
-    # ------------------------------------------------------------------
+    # ------------------------------------------------------------------------------------------
     # Step 1: Generate synthetic data
-    # ------------------------------------------------------------------
+    # ------------------------------------------------------------------------------------------
 
     print("[1/5] Generating transaction data...")
 
@@ -63,9 +63,9 @@ def run_training_pipeline(
 
     simulated_file = f"simulated_transactions_seed_{seed}.csv"
 
-    # ------------------------------------------------------------------
+    # ------------------------------------------------------------------------------------------
     # Step 2: Feature engineering
-    # ------------------------------------------------------------------
+    # ------------------------------------------------------------------------------------------
 
     print("[2/5] Engineering features...")
 
@@ -73,30 +73,36 @@ def run_training_pipeline(
 
     features_file = f"fraud_features_seed_{seed}.csv"
 
-    # ------------------------------------------------------------------
+    # ------------------------------------------------------------------------------------------
     # Step 3: Train model
-    # ------------------------------------------------------------------
+    # ------------------------------------------------------------------------------------------
 
     print("[3/5] Training model...")
 
     X_test, y_test = model_trainer(csv_name=features_file, algo_name=algo_name)
-
-    # ------------------------------------------------------------------
+    
+    model_name = f"{algo_name}_seed_{seed}.json"
+    
+    # ------------------------------------------------------------------------------------------
     # Step 4: Threshold optimization
-    # ------------------------------------------------------------------
+    # ------------------------------------------------------------------------------------------
 
     print("[4/5] Optimizing decision threshold...")
 
-    y_prob, y_pred = threshold_optimizer(X_test, y_test, algo_name=algo_name)
+    y_prob, y_pred = threshold_optimizer(X_test, y_test, model_name=model_name)
 
-    # ------------------------------------------------------------------
+    # ------------------------------------------------------------------------------------------
     # Step 5: Model evaluation
-    # ------------------------------------------------------------------
+    # ------------------------------------------------------------------------------------------
 
     print("[5/5] Evaluating model...")
 
-    model_evaluator(algo_name, X_test, y_test, y_prob, y_pred)
+    model_evaluator(model_name, X_test, y_test, y_prob, y_pred)
 
+    # ------------------------------------------------------------------------------------------
+    # --- End ----
+    # ------------------------------------------------------------------------------------------
+    
     end_time = datetime.now()
 
     duration = (end_time - start_time).total_seconds()
@@ -106,7 +112,7 @@ def run_training_pipeline(
 
     return {
         "status": "SUCCESS",
-        "algo_name": algo_name,
+        "model_name": model_name,
         "seed": seed,
         "duration_seconds": duration,
         "completed_at": end_time.isoformat(),
