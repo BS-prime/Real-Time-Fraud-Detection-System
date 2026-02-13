@@ -25,7 +25,7 @@ def threshold_optimizer(
     model_name: str,
     cost_fp: float | None = 1.0,
     cost_fn: float | None = 10.0,
-    save: bool = True,
+    save: bool = True
 ) -> tuple:
     """
     Docstring for threshold_optimizer

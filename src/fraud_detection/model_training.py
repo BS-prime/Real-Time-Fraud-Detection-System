@@ -118,7 +118,6 @@ def model_trainer(
             f"Supported types: {available_types}"
         )
 
-    print(f"Available models for training: {available_models}")
     print(f"Running GridSearch for: {algo_name}")
 
     # Initialize the specific class
@@ -136,13 +135,13 @@ def model_trainer(
     best_model = grid.best_estimator_
 
     # Saving the model with a unique name
-    save_path = OUTPUT_DIR / f"{algo_name}_seed_{seed_val}.json"
+    MODEL_PATH = OUTPUT_DIR / f"{algo_name}_seed_{seed_val}.json"
 
     # Save the model
     if model_type == "XGBClassifier":
-        best_model.save_model(str(save_path))
+        best_model.save_model(str(MODEL_PATH))
     else:
-        joblib.dump(best_model, save_path)
+        joblib.dump(best_model, MODEL_PATH)
 
     print("=" * 70)
     print(f"Model Name: '{algo_name}_seed_{seed_val}.json'")
