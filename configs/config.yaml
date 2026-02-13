@@ -1,7 +1,7 @@
 # config.yaml
 models:
   
-  random_forest: # This will be used in model naming after training.
+  RandomForest: # This will be used in model naming after training.
     type: "RandomForestClassifier"
     params:
       n_estimators: [500, 1000, 1500]                     # More trees help identify rare minority patterns

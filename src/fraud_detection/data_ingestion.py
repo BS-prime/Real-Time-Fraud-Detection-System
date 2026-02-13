@@ -112,18 +112,20 @@ def generate_transactions_data(
             user_id = random.choice(list(users.keys()))
             profile = users[user_id]
 
-            # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+            # ----------------------------------------------------------------------------------
             # ---- Timestamp (sequential behavior) ---
-            # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+            # ----------------------------------------------------------------------------------
+
+            # Generally people takes 5 mins atleast to make a transaction
 
             timestamp = profile["last_tx_time"] + timedelta(
                 minutes=random.randint(5, 1440)
             )
             profile["last_tx_time"] = timestamp
 
-            # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+            # ----------------------------------------------------------------------------------
             # ---- Normal behavior defaults ---
-            # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+            # ----------------------------------------------------------------------------------
 
             category = random.choice(
                 ["grocery", "food", "entertainment", "utilities", "tech"]
@@ -140,9 +142,9 @@ def generate_transactions_data(
             lat = round(profile["home_lat"] + random.uniform(-0.05, 0.05), 6)
             lon = round(profile["home_lon"] + random.uniform(-0.05, 0.05), 6)
 
-            # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+            # ----------------------------------------------------------------------------------
             # ---- Fraud injection (single random draw)
-            # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+            # ----------------------------------------------------------------------------------
 
             r = random.random()
 
@@ -161,7 +163,8 @@ def generate_transactions_data(
                 lat, lon = 40.7128, -74.0060  # Fraud hotspot
                 timestamp += timedelta(minutes=5)
                 is_fraud = 1
-
+            
+            # Creating a row 
             data.append(
                 [
                     fake.uuid4()[:12],
@@ -177,6 +180,10 @@ def generate_transactions_data(
                     is_fraud,
                 ]
             )
+
+        # -------------------------------------------------------------------------------------
+        # --- Putting all into a dataframe ---
+        # ------------------------------------------------------------------------------------
 
         df = pd.DataFrame(
             data,
