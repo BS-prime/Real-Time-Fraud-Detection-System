@@ -31,6 +31,25 @@ The system exposes a FastAPI inference service capable of sub-15ms
 response time, converting raw transactions into explainable fraud
 decisions.
 
+-------------------------------------------------------------------------
+
+## 📎 Why This Project Exists
+
+The project is fundamentally a decision system, with why behind all of
+decision.
+
+This project focuses on building an ML system that is:
+
+- Deployable
+
+- Explainable
+
+- Reliable
+
+- Operationally usable
+
+—not just accurate in a jupyter notebook.
+
 ------------------------------------------------------------------------
 
 ## 🚀 Key Engineering Solutions
@@ -143,6 +162,13 @@ Pipeline stages:
 
 ------------------------------------------------------------------------
 
+## 🧪 Testing
+
+```bash
+pytest -q
+```
+------------------------------------------------------------------------
+
 ## 🧠 Decision Layer
 
 Example response:
@@ -216,6 +242,7 @@ Demonstrates:
 ------------------------------------------------------------------------
 
 ## 🏗️ System Architecture
+
 ```mathematica
 Transaction Input
        │
