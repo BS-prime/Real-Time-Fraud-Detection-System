@@ -20,11 +20,11 @@ learning.
 This project demonstrates the full lifecycle of a deployable ML system,
 including:
 
--   Deterministic training pipeline orchestration\
--   Behavioral and geospatial feature engineering\
--   Cost-aware threshold optimization\
--   Low-latency FastAPI inference deployment\
--   Containerized runtime via Docker\
+-   Deterministic training pipeline orchestration
+-   Behavioral and geospatial feature engineering
+-   Cost-aware threshold optimization
+-   Low-latency FastAPI inference deployment
+-   Containerized runtime via Docker
 -   Explainable model validation using SHAP
 
 The system exposes a FastAPI inference service capable of sub-15ms
@@ -60,8 +60,8 @@ Optimizes fraud detection based on financial loss trade-offs.
 
 Uses XGBoost's native Booster interface for:
 
--   Direct execution in optimized C++ runtime\
--   Lower latency and memory overhead\
+-   Direct execution in optimized C++ runtime
+-   Lower latency and memory overhead
 -   Deterministic JSON model loading
 
 Typical inference latency: \< 15 ms
@@ -153,7 +153,7 @@ Example response:
 
 ``` json
 {
-  "model_version": "fraud_xgb_v1.0",
+  "model_version": "xgboost_v:1.0",
   "fraud_probability": 0.9718,
   "risk_band": "VERY_HIGH",
   "recommended_action": "BLOCK",
