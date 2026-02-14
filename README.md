@@ -192,3 +192,24 @@ Demonstrates:
 -   Containerized deployment
 
 ------------------------------------------------------------------------
+
+## 🏗️ System Architecture
+
+Transaction Input
+       │
+       ▼
+Feature Engineering
+       │
+       ▼
+XGBoost Booster (C++ inference)
+       │
+       ▼
+Decision Layer
+       │
+       ├── Risk Band
+       ├── Recommended Action
+       ├── Decision Reasons
+       └── Transparency Signals
+       │
+       ▼
+FastAPI Response (<15 ms)
