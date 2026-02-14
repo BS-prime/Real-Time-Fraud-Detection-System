@@ -20,16 +20,35 @@ learning.
 This project demonstrates the full lifecycle of a deployable ML system,
 including:
 
--   Deterministic training pipeline orchestration\
--   Behavioral and geospatial feature engineering\
--   Cost-aware threshold optimization\
--   Low-latency FastAPI inference deployment\
--   Containerized runtime via Docker\
+-   Deterministic training pipeline orchestration
+-   Behavioral and geospatial feature engineering
+-   Cost-aware threshold optimization
+-   Low-latency FastAPI inference deployment
+-   Containerized runtime via Docker
 -   Explainable model validation using SHAP
 
 The system exposes a FastAPI inference service capable of sub-15ms
 response time, converting raw transactions into explainable fraud
 decisions.
+
+-------------------------------------------------------------------------
+
+## 📎 Why This Project Exists
+
+The project is fundamentally a decision system, with why behind all of
+decision.
+
+This project focuses on building an ML system that is:
+
+- Deployable
+
+- Explainable
+
+- Reliable
+
+- Operationally usable
+
+—not just accurate in a jupyter notebook.
 
 ------------------------------------------------------------------------
 
@@ -60,8 +79,8 @@ Optimizes fraud detection based on financial loss trade-offs.
 
 Uses XGBoost's native Booster interface for:
 
--   Direct execution in optimized C++ runtime\
--   Lower latency and memory overhead\
+-   Direct execution in optimized C++ runtime
+-   Lower latency and memory overhead
 -   Deterministic JSON model loading
 
 Typical inference latency: \< 15 ms
@@ -143,6 +162,13 @@ Pipeline stages:
 
 ------------------------------------------------------------------------
 
+## 🧪 Testing
+
+```bash
+pytest -q
+```
+------------------------------------------------------------------------
+
 ## 🧠 Decision Layer
 
 Example response:
@@ -153,7 +179,7 @@ Example response:
 
 ``` json
 {
-  "model_version": "fraud_xgb_v1.0",
+  "model_version": "xgboost_v:1.0",
   "fraud_probability": 0.9718,
   "risk_band": "VERY_HIGH",
   "recommended_action": "BLOCK",
@@ -169,15 +195,37 @@ Example response:
 
 ## 🧰 Tech Stack
 
-Machine Learning: - XGBoost - Scikit-Learn
+🧠 Machine Learning
 
-API: - FastAPI - Pydantic - Uvicorn
+- ⚡ XGBoost (native Booster inference)
 
-Explainability(Offline): - SHAP
+- 🔬 Scikit-Learn
 
-Monitoring: - Evidently AI
+🚀 API & Inference
 
-Deployment: - Docker
+- ⚡ FastAPI
+
+- 🧾 Pydantic v2
+
+- 🌐 Uvicorn
+
+🔍 Explainability & Monitoring
+
+- 🧩 SHAP (offline validation)
+
+- 📊 Evidently AI
+
+📦 Deployment
+
+- 🐳 Docker
+
+- 📁 JSON model serialization
+
+🔁 Pipeline & Architecture
+
+- 🧠 Custom training pipeline orchestrator
+
+- 🧱 Modular src/ project structure
 
 ------------------------------------------------------------------------
 
@@ -192,3 +240,26 @@ Demonstrates:
 -   Containerized deployment
 
 ------------------------------------------------------------------------
+
+## 🏗️ System Architecture
+
+```mathematica
+Transaction Input
+       │
+       ▼
+Feature Engineering
+       │
+       ▼
+XGBoost Booster (C++ inference)
+       │
+       ▼
+Decision Layer
+       │
+       ├── Risk Band
+       ├── Recommended Action
+       ├── Decision Reasons
+       └── Transparency Signals
+       │
+       ▼
+FastAPI Response (<15 ms)
+```
