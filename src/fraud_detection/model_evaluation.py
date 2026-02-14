@@ -111,10 +111,12 @@ def model_evaluator(
     else:
         shap_values_to_plot = shap_values
 
-    plt.figure(figsize=(6, 14))
+    plt.figure()
 
-    shap.summary_plot(shap_values_to_plot, X_test, plot_type="bar")
-
-    plt.savefig(SHAP_OUTPUT_DIR / f"shap_summary_{model_name}.png")
+    shap.summary_plot(shap_values_to_plot, X_test, plot_type="bar",show=False)
+    
+    plt.savefig(
+        SHAP_OUTPUT_DIR / f"shap_summary_{model_name}.png", bbox_inches="tight", dpi=300
+    )
 
     plt.close()
