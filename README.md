@@ -216,7 +216,7 @@ Demonstrates:
 ------------------------------------------------------------------------
 
 ## 🏗️ System Architecture
-
+```mathematica
 Transaction Input
        │
        ▼
@@ -235,3 +235,4 @@ Decision Layer
        │
        ▼
 FastAPI Response (<15 ms)
+```
