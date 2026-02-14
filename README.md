@@ -169,15 +169,37 @@ Example response:
 
 ## 🧰 Tech Stack
 
-Machine Learning: - XGBoost - Scikit-Learn
+🧠 Machine Learning
 
-API: - FastAPI - Pydantic - Uvicorn
+- ⚡ XGBoost (native Booster inference)
 
-Explainability(Offline): - SHAP
+- 🔬 Scikit-Learn
 
-Monitoring: - Evidently AI
+🚀 API & Inference
 
-Deployment: - Docker
+- ⚡ FastAPI
+
+- 🧾 Pydantic v2
+
+- 🌐 Uvicorn
+
+🔍 Explainability & Monitoring
+
+- 🧩 SHAP (offline validation)
+
+- 📊 Evidently AI
+
+📦 Deployment
+
+- 🐳 Docker
+
+- 📁 JSON model serialization
+
+🔁 Pipeline & Architecture
+
+- 🧠 Custom training pipeline orchestrator
+
+- 🧱 Modular src/ project structure
 
 ------------------------------------------------------------------------
 
