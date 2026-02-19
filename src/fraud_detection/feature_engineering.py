@@ -129,14 +129,17 @@ def feature_engineer(
         # 2. Transaction velocity
         # --------------------------------------------------------------------------------------------
 
-        # Number of transactions in the past 24 hours per user
-
         counts = (
-            df.groupby("user_id").rolling("24h", on="timestamp")["tx_id"].count().values
+            df.groupby("user_id")
+            .rolling("24h", on="timestamp", closed="left")["tx_id"]
+            .count()
+            .reset_index(level=0, drop=True) # Drops the index on 'user_id' level
+            .values
         )
 
-        # Then assign it back to a column
+        # 3. Assign back
         df["tx_count_24h"] = counts
+        df["tx_count_24h"] = df["tx_count_24h"].fillna(0)
 
         # --------------------------------------------------------------------------------------------
         # 3. Behavioral features
@@ -171,28 +174,40 @@ def feature_engineer(
         ).fillna(0)
 
         # Calculate time difference in hours
+        time_diff = (df["timestamp"] - df["prev_ts"]).dt.total_seconds() / 3600.0
 
-        time_diff_hours = (
-            (df["timestamp"] - df["prev_ts"])
-            .dt.total_seconds()
-            .div(3600)
-            .clip(lower=1e-3)
+        # If time passed is > 0, calculate speed. Otherwise, velocity is 0.
+        df["travel_velocity_kmph"] = np.where(
+            time_diff > 0, df["dist_from_last_tx_km"] / time_diff, 0
+        )
+    
+        # --------------------------------------------------------------------------------------------
+        # 5. Fraud rate features
+        # --------------------------------------------------------------------------------------------
+
+        # Some user can be frequently targeted
+        df["fraud_rate_user"] = (
+            df.groupby("user_id")["is_fraud"]
+            .apply(lambda x: x.shift(1).expanding().mean())
+            .reset_index(level=0, drop=True)
+            .fillna(0)
         )
 
-        # Calculate travel velocity (km/h) - handle division by zero
-
-        df["travel_velocity_kmph"] = np.where(
-            time_diff_hours == 0, df["dist_from_last_tx_km"] / time_diff_hours, 0
+        df["fraud_rate_device"] = (
+            df.groupby("device_id")["is_fraud"]
+            .apply(lambda x: x.shift(1).expanding().mean())
+            .reset_index(level=0, drop=True)
+            .fillna(0)
         )
 
         # --------------------------------------------------------------------------------------------
-        # 5. Categorical encoding
+        # 6. Categorical encoding
         # --------------------------------------------------------------------------------------------
 
         df = pd.get_dummies(df, columns=["auth_method", "category"], drop_first=True)
 
         # --------------------------------------------------------------------------------------------
-        # 6. Drop non-model columns
+        # 7. Drop non-model columns
         # --------------------------------------------------------------------------------------------
 
         df = df.drop(
@@ -209,7 +224,7 @@ def feature_engineer(
         )
 
         # --------------------------------------------------------------------------------------------
-        # 7. Final numeric safety
+        # 8. Final numeric safety
         # --------------------------------------------------------------------------------------------
 
         num_cols = df.select_dtypes(include="number").columns

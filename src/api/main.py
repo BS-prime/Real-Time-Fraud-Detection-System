@@ -12,7 +12,6 @@ from pathlib import Path
 from datetime import datetime
 
 
-
 # ==============================================================================
 # --- Model loading (fail fast) ---
 # ==============================================================================
@@ -27,8 +26,7 @@ if not MODEL_FILE.exists():
 model = xgb.Booster()
 model.load_model(str(MODEL_FILE))
 
-MODEL_VERSION = "XGBoost_v:1.0"
-
+MODEL_VERSION = "XGBoost_v:1.0(seed 42)"
 
 
 # ==============================================================================
@@ -45,36 +43,36 @@ with open(THRESHOLD_PATH) as f:
     THRESHOLD = json.load(f)["best_threshold"]
 
 
-
 # ==============================================================================
 # --- Constants ---
 # ==============================================================================
 
 # Define all the features for further use
 FEATURE_COLUMNS = [
-    'amount',  
-    'lat', 
-    'lon',
-    'hour', 
-    'day_of_week', 
-    'tx_count_24h', 
-    'avg_spend_user', 
-    'amount_ratio', 
-    'dist_from_last_tx_km', 
-    'travel_velocity_kmph', 
-    'auth_method_PIN', 
-    'auth_method_Password',
-    'category_food', 
-    'category_grocery', 
-    'category_tech', 
-    'category_travel',
-    'category_utilities'
+    "amount",
+    "lat",
+    "lon",
+    "hour",
+    "day_of_week",
+    "tx_count_24h",
+    "avg_spend_user",
+    "amount_ratio",
+    "dist_from_last_tx_km",
+    "travel_velocity_kmph",
+    "fraud_rate_user",
+    "fraud_rate_device",
+    "auth_method_PIN",
+    "auth_method_Password",
+    "category_food",
+    "category_grocery",
+    "category_tech",
+    "category_travel",
+    "category_utilities",
 ]
 
 # default values for missing user history
 GLOBAL_AVG_SPEND = 60.0
 DEFAULT_TIME_DELTA_MIN = 6.0
-
 
 
 # ==============================================================================
@@ -84,21 +82,21 @@ DEFAULT_TIME_DELTA_MIN = 6.0
 app = FastAPI(title="Fraud Guard 2026")
 
 
-
 # ==============================================================================
 # --- 2. Request schema ---
 # ==============================================================================
 
+
 class Transaction(BaseModel):
-    user_id: str
+    user_id: str | None = "USER_123"
+    device_id: str | None = "DEVICE_456"
     amount: float = Field(gt=0)
-    lat: float | None  = Field(le= 90.00, ge=-90.0)
-    lon: float | None  = Field(le= 180.00, ge=-180.0)
+    lat: float | None = Field(le=90.00, ge=-90.0, default= 45.0)
+    lon: float | None = Field(le=180.00, ge=-180.0, default= 45.0)
     auth_method: Literal["Biometric", "PIN", "Password"]
     category: Literal["food", "grocery", "tech", "travel", "utilities", "entertainment"]
     time_delta_min: float | None = Field(default=None, gt=0)
     tx_count_24h: int | None = Field(default=3, ge=0)
-
 
 
 # ==============================================================================
@@ -112,17 +110,24 @@ user_history = {
         "avg_spend": 45.0,
         "last_lat": 34.05,
         "last_lon": -118.24,
+        "fraud_rate_user": 0.02,
+    }
+}
+
+device_history = {
+    "DEVICE_456": {
+        "fraud_rate_device": 0.03,
     }
 }
 
 
+# ==============================================================================
+# --- helper functions and variables ---
+# ==============================================================================
 
-# ==============================================================================
-# --- helper functions ---
-# ==============================================================================
 
 def coord_delta(lat1, lon1, lat2, lon2) -> float:
-    R = 6371.0  # in km of course
+    R = 6371.0  # radious of earth
     lat1, lon1, lat2, lon2 = map(np.radians, [lat1, lon1, lat2, lon2])
     dlat = lat2 - lat1
     dlon = lon2 - lon1
@@ -137,10 +142,10 @@ day_of_week = datetime.today().weekday()
 hour = datetime.today().hour
 
 
-
 # ==============================================================================
 # --- Decision Logic Layer (Business Logic) ---
 # ==============================================================================
+
 
 def get_risk_band(probability: float) -> str:
     """Maps probability to human-readable risk level."""
@@ -159,22 +164,22 @@ def decide_action(probability: float, threshold: float) -> str:
     if probability >= threshold:
         return "BLOCK"
     elif probability >= 0.50:
-        return "CHALLENGE"
+        return "REVIEW"
     else:
         return "ALLOW"
 
 
 def get_decision_reasons(
-    amount_ratio: float,
-    travel_velocity_kmph: float,
-    tx_count_24h: int
+    amount_ratio: float, travel_velocity_kmph: float, tx_count_24h: int
 ) -> list[str]:
     """Provides human-readable explanation signals."""
-    
+
     reasons = []
 
     if amount_ratio >= 3:
-        reasons.append("Transaction amount significantly higher than user's normal spending")
+        reasons.append(
+            "Transaction amount significantly higher than user's normal spending"
+        )
 
     if travel_velocity_kmph >= 800:
         reasons.append("Transaction location implies unrealistic travel speed")
@@ -182,36 +187,41 @@ def get_decision_reasons(
     if tx_count_24h >= 20:
         reasons.append("Unusually high number of transactions in past 24 hours")
 
-    if amount_ratio >= 10 or travel_velocity_kmph >= 900: # commercial flight threshold (e.g., 900 km/h)
+    if (
+        amount_ratio >= 10 or travel_velocity_kmph >= 900
+    ):  # commercial flight threshold (e.g., 900 km/h)
         reasons.append("Extreme deviation from user spending behavior")
 
     return reasons[:3]  # limit to top 3
 
 
-def get_fallbacks_used(
-    tx,
-    history
-) -> list[str]:
+def get_fallbacks_used(tx, user_stats, device_stats) -> list[str]:
     """Reports fallback defaults used during feature engineering."""
-    
+
     fallbacks = []
 
     if tx.time_delta_min is None:
         fallbacks.append("DEFAULT_TIME_DELTA_USED")
 
-    if history["avg_spend"] == GLOBAL_AVG_SPEND:
+    if user_stats["avg_spend"] == GLOBAL_AVG_SPEND:
         fallbacks.append("GLOBAL_AVG_SPEND_USED")
 
-    if history["last_lat"] == tx.lat and history["last_lon"] == tx.lon:
-        fallbacks.append("NO_LOCATION_HISTORY")
+    if user_stats["last_lat"] == tx.lat and user_stats["last_lon"] == tx.lon:
+        fallbacks.append("DEFAULT_LOCATION_HISTORY_USED")
+
+    if user_stats["fraud_rate_user"] == 0.03:
+        fallbacks.append("DEFAULT_USER_FRAUD_HISTORY")
+
+    if device_stats["fraud_rate_device"] == 0.1:
+        fallbacks.append("DEFAULT_DEVICE_FRAUD_HISTORY")
 
     return fallbacks
-
 
 
 # ==============================================================================
 # --- 3. API Endpoints ---
 # ==============================================================================
+
 
 @app.get("/")
 def health_check():
@@ -220,42 +230,47 @@ def health_check():
 
 @app.post("/predict")
 async def predict_fraud(tx: Transaction):
-
-
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     # --- fetch history ---
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
     # Usually in real cases history get fetch from a real database
-    history = user_history.get(
+    user_stats = user_history.get(
         tx.user_id,
         {
             "avg_spend": GLOBAL_AVG_SPEND,
-            "last_lat": tx.lat,
-            "last_lon": tx.lon,
+            "last_lat": 45.0,
+            "last_lon": 45.0,
+            "fraud_rate_user": 0.01,
         },
     )
 
-    
+    device_stats = device_history.get(
+        tx.device_id,
+        {
+            "fraud_rate_device": 0.1,
+        },
+    )
+
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     # --- real time feature engineering ---
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
     # ratio between current amount and historical average
-    amount_ratio = tx.amount / (history["avg_spend"] + 1e-6)
+    amount_ratio = tx.amount / (user_stats["avg_spend"] + 1e-6)
 
     # distance from last transaction
     dist_from_last_tx_km = coord_delta(
         tx.lat,
         tx.lon,
-        history["last_lat"],
-        history["last_lon"],
-    )  
-    
+        user_stats["last_lat"],
+        user_stats["last_lon"],
+    )
+
     # handle auth method one-hot encoding
     auth_method_PIN = 1 if tx.auth_method == "PIN" else 0
     auth_method_Password = 1 if tx.auth_method == "Password" else 0
-    
+
     # handle category one-hot encoding
     category_food = 1 if tx.category == "food" else 0
     category_grocery = 1 if tx.category == "grocery" else 0
@@ -263,70 +278,59 @@ async def predict_fraud(tx: Transaction):
     category_travel = 1 if tx.category == "travel" else 0
     category_utilities = 1 if tx.category == "utilities" else 0
 
-        
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     # --- deterministic fallback ---
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-    
+
     time_delta = tx.time_delta_min or DEFAULT_TIME_DELTA_MIN
-    
+
     # travel velocity in km/h
     travel_velocity_kmph = dist_from_last_tx_km / (time_delta / 60.0)
-    
-    
+
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     # --- prepare feature vector ---
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
     features = np.array(
-        [[
-            tx.amount,
-            tx.lat,
-            tx.lon,
-            hour,
-            day_of_week,
-            tx.tx_count_24h,
-            history["avg_spend"],
-            amount_ratio,
-            dist_from_last_tx_km,
-            travel_velocity_kmph,
-            auth_method_PIN,
-            auth_method_Password,
-            category_food,
-            category_grocery,
-            category_tech,
-            category_travel,
-            category_utilities
-        ]],
+        [
+            [
+                tx.amount,
+                tx.lat,
+                tx.lon,
+                hour,
+                day_of_week,
+                tx.tx_count_24h,
+                user_stats["avg_spend"],
+                amount_ratio,
+                dist_from_last_tx_km,
+                travel_velocity_kmph,
+                user_stats["fraud_rate_user"],
+                device_stats["fraud_rate_device"],
+                auth_method_PIN,
+                auth_method_Password,
+                category_food,
+                category_grocery,
+                category_tech,
+                category_travel,
+                category_utilities,
+            ]
+        ],
         dtype=np.float32,
     )
 
     if features.shape[1] != len(FEATURE_COLUMNS):
-        raise HTTPException(
-            status_code=500, 
-            detail="Feature vector mismatch"
-        )
-
+        raise HTTPException(status_code=500, detail="Feature vector mismatch")
 
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     # --- inference ---
     # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
     try:
-        dmatrix = xgb.DMatrix(
-            features, 
-            feature_names=FEATURE_COLUMNS
-        )
-        probability = float(
-            model.predict(dmatrix)[0]
-        )
-
+        dmatrix = xgb.DMatrix(features, feature_names=FEATURE_COLUMNS)
+        probability = float(model.predict(dmatrix)[0])
 
     except Exception as e:
-        raise HTTPException(
-            status_code=500, 
-            detail=f"Inference error: {e}"
-        )
+        raise HTTPException(status_code=500, detail=f"Inference error: {e}")
 
     # ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     # --- Decision Layer ---
@@ -334,22 +338,11 @@ async def predict_fraud(tx: Transaction):
 
     risk = get_risk_band(probability)
 
-    action = decide_action(
-        probability,
-        THRESHOLD
-    )
+    action = decide_action(probability, THRESHOLD)
 
-    reasons = get_decision_reasons(
-        amount_ratio,
-        travel_velocity_kmph,
-        tx.tx_count_24h
-    )
+    reasons = get_decision_reasons(amount_ratio, travel_velocity_kmph, tx.tx_count_24h)
 
-    fallbacks_used = get_fallbacks_used(
-        tx,
-        history
-    )
-
+    fallbacks_used = get_fallbacks_used(tx, user_stats, device_stats)
 
     # ==============================================================================
     # --- Final Response ---
@@ -357,21 +350,16 @@ async def predict_fraud(tx: Transaction):
 
     return {
         "model_version": MODEL_VERSION,
-
         # model output
         "fraud_probability": round(probability, 4),
-
         # business interpretation
         "risk_band": risk,
         "recommended_action": action,
-
         # explainability
         "decision_reasons": reasons,
-
         # transparency
-        "fallbacks_used": fallbacks_used
+        "fallbacks_used": fallbacks_used,
     }
-
 
 
 # ==============================================================================
@@ -380,6 +368,7 @@ async def predict_fraud(tx: Transaction):
 
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
 
 

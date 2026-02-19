@@ -124,13 +124,13 @@ Docker enables reproducible, environment-independent deployment.
 Pull the prebuilt image from Docker Hub:
 
 ``` bash
-docker pull bsprime777/fraud-guard-v:1.1.0
+docker pull bsprime777/fraud-guard:0.1.0
 ```
 
 Run the container:
 
 ``` bash
-docker run -p 8000:8000 bsprime777/fraud-guard-v:1.1.0
+docker run -p 8000:8000 bsprime777/fraud-guard:0.1.0
 ```
 
 Access API documentation:
