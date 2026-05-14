@@ -110,7 +110,6 @@ def model_trainer(
     settings = config["models"][algo_name]
     model_type = settings["type"]
 
-    
     if model_type not in algo_map:
         available_types = ", ".join(algo_map.keys())
         raise ValueError(
