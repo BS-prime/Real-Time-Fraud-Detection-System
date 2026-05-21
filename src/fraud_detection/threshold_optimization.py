@@ -2,14 +2,12 @@
 # --- Import the libraries ---
 # ====================================================================================================
 
+import json
 from pathlib import Path
 
-import json
 import joblib
-
 import numpy as np
 import pandas as pd
-
 import xgboost as xgb
 from sklearn.metrics import confusion_matrix
 
@@ -20,12 +18,12 @@ from sklearn.metrics import confusion_matrix
 
 
 def threshold_optimizer(
-    X_test: pd.DataFrame,
-    y_test: pd.Series,
-    model_name: str,
-    cost_fp: float | None = 1.0,
-    cost_fn: float | None = 10.0,
-    save: bool = True
+        X_test: pd.DataFrame,
+        y_test: pd.Series,
+        model_name: str,
+        cost_fp: float | None = 1.0,
+        cost_fn: float | None = 10.0,
+        save: bool = True
 ) -> tuple:
     """
     Docstring for threshold_optimizer
@@ -100,10 +98,10 @@ def threshold_optimizer(
     # ------------------------------------------------------------------------------------------
 
     def compute_cost(
-        y_test=y_test,
-        y_pred=None,
-        cost_fp=cost_fp,
-        cost_fn=cost_fn,
+            y_test=y_test,
+            y_pred=None,
+            cost_fp=cost_fp,
+            cost_fn=cost_fn,
     ) -> float:
         """
         Function to compute business cost based on confusion matrix.
@@ -119,10 +117,10 @@ def threshold_optimizer(
 
     # Find the optimal probability threshold to minimize business cost.
     def find_optimal_threshold(
-        y_test=y_test,
-        y_prob=y_prob,
-        cost_fp=cost_fp,
-        cost_fn=cost_fn,
+            y_test=y_test,
+            y_prob=y_prob,
+            cost_fp=cost_fp,
+            cost_fn=cost_fn,
     ) -> dict:
         """
         Find the optimal threshold that minimizes business cost.
@@ -170,7 +168,6 @@ def threshold_optimizer(
     # ------------------------------------------------------------------------------------------
 
     if save:
-
         def save_threshold(threshold_info=threshold_info, path=path) -> json:
             """
             Function to save new threshold information in a JSON file.
