@@ -25,7 +25,7 @@ For a recruiter or hiring manager, this project signals practical ML engineering
 
 ## Snapshot
 
-| Evidence in this project |
+| Signal | Evidence in this project |
 | --- | --- |
 | End-to-end ML delivery | Synthetic data generation, feature engineering, training, thresholding, evaluation, API serving |
 | Production mindset | Dockerfile, persisted artifacts, API validation, deterministic startup checks |
