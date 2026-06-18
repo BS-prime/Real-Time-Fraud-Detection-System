@@ -10,7 +10,6 @@ models:
       min_samples_leaf: [10]                              # Ensures leaves are statistically significant, reducing false positives
       max_features: ["sqrt", "log2"]                      # Standard for diverse trees in ensemble
       bootstrap: [true]
-      n_jobs: [2, 4, 8]
       n_jobs: [-1]                                   # Use all available CPU cores for speed
       
 
