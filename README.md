@@ -10,7 +10,7 @@ Fraud Guard 2026 is a deployable machine learning decision system for real-time 
 
 The goal of this project is not just to train a model. The goal is to show how a fraud detection model can be turned into software that a risk team could actually use: reliable inputs, engineered signals, optimized business decisions, API responses, model artifacts, monitoring reports, and a containerized runtime.
 
-## What Makes This Project Stand Out
+## Why this project is special
 
 Most ML portfolio projects stop at notebook accuracy. This project goes further by treating fraud detection as a production decision problem.
 
@@ -20,8 +20,6 @@ Most ML portfolio projects stop at notebook accuracy. This project goes further 
 - It serves predictions through a real API, not just a notebook cell.
 - It returns business actions such as `ALLOW`, `CHALLENGE`, and `BLOCK`.
 - It includes drift monitoring so the model can be evaluated after deployment.
-
-For a recruiter or hiring manager, this project signals practical ML engineering ability: modeling, backend API design, MLOps thinking, deployment readiness, and business-aware decision logic.
 
 ## Snapshot
 
