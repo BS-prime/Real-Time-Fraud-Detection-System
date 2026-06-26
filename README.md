@@ -25,73 +25,15 @@ The project is designed like a production-oriented ML portfolio build: it does n
 
 ## Problem Statement
 
-<<<<<<< HEAD
-Fraud teams need fast decisions that balance customer friction against financial loss. A generic probability threshold such as `0.5` is rarely suitable because false negatives and false positives have very different business costs.
-=======
-Fraud teams need decisions that are fast, explainable, and aligned with financial risk. A default classifier threshold is rarely sufficient because the cost of missing fraud differs greatly from the cost of challenging a legitimate customer.
->>>>>>> b455a65355d99faf3c3327390ad0bbbe022f58f4
+Fraud teams need fast, explainable decisions that balance customer friction against financial loss. A default classifier threshold such as `0.5` is rarely sufficient because the cost of missing fraud differs greatly from the cost of challenging a legitimate customer.
 
 This project models that workflow:
 
-<<<<<<< HEAD
 1. Create transaction data with injected fraud patterns.
 2. Engineer behavioral, temporal, categorical, and geospatial signals.
 3. Train an imbalanced classification model.
 4. Optimize the operating threshold using false-positive and false-negative costs.
 5. Serve the decision through an API that returns probability, risk level, action, and explanation.
-=======
-## Core Capabilities
-
-### Real-Time Fraud Scoring API
-
-The FastAPI service accepts a transaction request and returns a complete fraud decision:
-
-- Fraud probability from the trained model
-- Risk band: `LOW`, `MEDIUM`, `HIGH`, or `VERY_HIGH`
-- Recommended action: `ALLOW`, `CHALLENGE`, or `BLOCK`
-- Plain-English decision reasons
-- Fallback indicators when user history is missing
-- Model version metadata
-
-### Geospatial Impossible-Travel Detection
-
-Fraud Guard calculates the distance between a user's current and previous transaction locations using the Haversine formula. It then derives an implied travel velocity in km/h.
-
-This creates a strong fraud signal for account takeover patterns where the same user appears to transact from locations that are physically unrealistic within the available time window.
-
-### Behavioral Feature Engineering
-
-The model is trained on features that reflect how fraud analysts often think about suspicious behavior:
-
-- `amount_ratio`: current transaction amount compared with the user's average spend
-- `tx_count_24h`: recent transaction frequency
-- `dist_from_last_tx_km`: distance from the previous transaction
-- `travel_velocity_kmph`: implied travel speed between transactions
-- Authentication method signals
-- Merchant category signals
-
-### Cost-Sensitive Decision Thresholding
-
-The project does not rely on a generic `0.5` probability cutoff. It searches for an operating threshold that minimizes business cost using false-positive and false-negative penalties.
-
-Current XGBoost threshold metadata is stored in:
-
-```text
-artifacts/model_thresholds/optimal_threshold_xgboost_seed_42.json
-```
-
-### Explainable Decision Layer
-
-The API response is designed for humans as well as systems. Instead of returning only a probability, it explains why a transaction looks risky.
-
-Example explanations include:
-
-- The transaction amount is significantly higher than normal behavior.
-- Transaction location implies unrealistic travel speed.
-- Transaction frequency is unusually high within 24 hours.
-
-This makes the project stronger as a portfolio piece because it shows the bridge between model output and operational decision-making.
->>>>>>> b455a65355d99faf3c3327390ad0bbbe022f58f4
 
 ## System Architecture
 
@@ -440,13 +382,8 @@ pytest -q
 
 Current tests cover:
 
-<<<<<<< HEAD
-- model probability output stays within `[0, 1]`
-- fraud risk does not drop sharply when transaction amount increases significantly
-=======
 - Model predictions stay within a valid probability range.
 - Fraud risk does not drop unexpectedly when the transaction amount increases sharply.
->>>>>>> b455a65355d99faf3c3327390ad0bbbe022f58f4
 
 ## Monitoring
 
