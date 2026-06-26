@@ -35,7 +35,7 @@ Most ML portfolio projects stop at notebook accuracy. This project goes further 
 
 ## Business Problem
 
-Fraud teams need decisions that are fast, explainable, and aligned with financial risk. A default classifier threshold is rarely enough because the cost of missing fraud is very different from the cost of challenging a legitimate customer.
+Fraud teams need decisions that are fast, explainable, and aligned with financial risk. A default classifier threshold is rarely sufficient because the cost of missing fraud differs greatly from the cost of challenging a legitimate customer.
 
 This system is built around that reality. It scores a transaction, interprets the risk, and returns an action that can be used by a payment workflow or fraud review queue.
 
@@ -85,7 +85,7 @@ The API response is designed for humans as well as systems. Instead of returning
 
 Example explanations include:
 
-- Transaction amount is significantly higher than normal behavior.
+- The transaction amount is significantly higher than normal behavior.
 - Transaction location implies unrealistic travel speed.
 - Transaction frequency is unusually high within 24 hours.
 
@@ -286,7 +286,7 @@ pytest -q
 The tests validate that:
 
 - Model predictions stay within a valid probability range.
-- Fraud risk does not drop unexpectedly when transaction amount increases sharply.
+- Fraud risk does not drop unexpectedly when the transaction amount increases sharply.
 
 ## Monitoring
 
