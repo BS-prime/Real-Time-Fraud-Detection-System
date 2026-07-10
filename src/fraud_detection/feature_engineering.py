@@ -182,7 +182,7 @@ def feature_engineer(
         # Calculate travel velocity (km/h) - handle division by zero
 
         df["travel_velocity_kmph"] = np.where(
-            time_diff_hours == 0, df["dist_from_last_tx_km"] / time_diff_hours, 0
+            time_diff_hours != 0, df["dist_from_last_tx_km"] / time_diff_hours, 0
         )
 
         # --------------------------------------------------------------------------------------------
