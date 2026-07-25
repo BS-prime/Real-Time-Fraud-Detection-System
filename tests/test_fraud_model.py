@@ -1,99 +1,53 @@
-# ==============================================================================================
-# --- Import libraries ---
-# ==============================================================================================
-
-import xgboost as xgb
-import numpy as np
 from pathlib import Path
 
-# Define model path
+import pandas as pd
+import pytest
+
+from fraud_detection.feature_schema import FEATURE_COLUMNS
+from fraud_detection.model_io import load_model, predict_fraud_probability
+
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-
-MODEL_PATH = PROJECT_ROOT / Path("artifacts/models/xgboost_seed_42.json")
-
+MODEL_PATH = PROJECT_ROOT / "artifacts" / "models" / "xgboost_seed_42.json"
 
 
-# ==============================================================================================
-# --- Model Output Tests ---
-# ==============================================================================================
-
-def test_model_output_range():
-
-    """
-    Ensure the model always predicts a probability between 0 and 1.
-    """
-
-    
-    model = xgb.Booster()
-    model.load_model(str(MODEL_PATH))
-    
-    # Create mock data (1 row, matching training features)
-    mock_data = np.random.rand(1, 17).astype(np.float32)
- 
-    dmatrix = xgb.DMatrix(mock_data)
-    
-    prediction = model.predict(dmatrix)[0]
-    assert 0 <= prediction <= 1, "Model output is not a valid probability!"
+@pytest.fixture(scope="module")
+def model():
+    return load_model(MODEL_PATH)
 
 
-
-# ==============================================================================================
-# --- Heuristic Tests ---
-# ==============================================================================================
-
-def test_high_amount_risk():
-    
-    """
-    Heuristic Test:
-    As transaction amount increases significantly,
-    predicted fraud risk should not decrease sharply.
-    """
-    
-    
-    model = xgb.Booster()
-    model.load_model(str(MODEL_PATH))
-
-
-    # Base transaction (low amount) 
-    base = np.array(
-    [[
-        20.0,        # tx.amount, amount is low, to make it a normal transaction
-        12.9716,      # tx.lat
-        77.5946,      # tx.lon
-        14,           # hour (2 PM)
-        2,            # day_of_week (Wednesday)
-        3,            # tx.tx_count_24h
-        350.0,        # history["avg_spend"]
-        0.057,         # amount_ratio (20 / 350)
-        1.2,          # dist_from_last_tx_km
-        5.0,          # travel_velocity_kmph
-        1.0,          # auth_method_PIN
-        0.0,          # auth_method_Password
-        1.0,          # category_food
-        0.0,          # category_grocery
-        0.0,          # category_tech
-        0.0,          # category_travel
-        0.0           # category_utilities
-    ]],
-    dtype=np.float32
-)
-
-    # High-amount transaction 
-    high = base.copy()
-
-    high[0, 0] = 10_000  # Update the amount feature (index 0)
-    high[0, 7] = high[0, 0] / high[0, 6]  # Update amount_ratio accordingly
-
-    # Create DMatrix for both
-    d_low = xgb.DMatrix(base)
-    d_high = xgb.DMatrix(high)
-
-    # Make the predictions
-    low_risk = model.predict(d_low)[0]
-    high_risk = model.predict(d_high)[0]
-
-    # Assert that risk does not drop significantly with higher amount
-    assert high_risk >= low_risk * 0.7, (
-        f"Risk dropped unexpectedly when amount increased: "
-        f"low={low_risk}, high={high_risk}"
+def transaction_features(amount: float) -> pd.DataFrame:
+    """Create one model-ready transaction row for tests."""
+    row = dict.fromkeys(FEATURE_COLUMNS, 0.0)
+    row.update(
+        {
+            "amount": amount,
+            "lat": 12.9716,
+            "lon": 77.5946,
+            "hour": 14,
+            "day_of_week": 2,
+            "tx_count_24h": 3,
+            "avg_spend_user": 350.0,
+            "amount_ratio": amount / 350.0,
+            "dist_from_last_tx_km": 1.2,
+            "travel_velocity_kmph": 5.0,
+            "auth_method_PIN": 1.0,
+            "category_food": 1.0,
+        }
     )
+    return pd.DataFrame([row], columns=FEATURE_COLUMNS).astype("float32")
+
+
+def test_model_output_range(model):
+    probability = predict_fraud_probability(model, transaction_features(amount=20.0))[0]
+    assert 0 <= probability <= 1
+
+
+def test_high_amount_risk_does_not_drop_sharply(model):
+    low_risk = predict_fraud_probability(model, transaction_features(amount=20.0))[0]
+    high_risk = predict_fraud_probability(model, transaction_features(amount=10_000.0))[0]
+
+    assert high_risk >= low_risk * 0.7
+
+
+def test_feature_schema_has_expected_model_width():
+    assert len(FEATURE_COLUMNS) == 17
