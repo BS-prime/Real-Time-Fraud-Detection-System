@@ -1,248 +1,113 @@
-# ================================================================================================================
-# --- Import Libraries ---
-# ================================================================================================================
+"""Feature engineering for fraud model training."""
 
-from pathlib import Path
 import pandas as pd
 import numpy as np
 
+from fraud_detection.feature_schema import (
+    AUTH_METHODS,
+    CATEGORIES,
+    FEATURE_COLUMNS,
+    TARGET_COLUMN,
+)
+from fraud_detection.geo import haversine_km
+from fraud_detection.naming import seed_from_filename
+from fraud_detection.paths import FEATURE_DATA_DIR, SIMULATED_DATA_DIR, ensure_directory
 
-# ================================================================================================================
-# --- Feature Engineering ---
-# ================================================================================================================
+NON_MODEL_COLUMNS = [
+    "tx_id",
+    "prev_lat",
+    "prev_lon",
+    "prev_ts",
+    "timestamp",
+    "user_id",
+    "device_id",
+    "ip_address",
+]
+
+
+def load_transactions(csv_name: str) -> pd.DataFrame:
+    """Load a raw synthetic transaction CSV from ``data/simulated``."""
+    csv_path = SIMULATED_DATA_DIR / csv_name
+    if not csv_path.exists():
+        raise FileNotFoundError(f"Transaction file not found: {csv_path}")
+    return pd.read_csv(csv_path)
+
+
+def engineer_transaction_features(transactions: pd.DataFrame) -> pd.DataFrame:
+    """Convert raw transactions into model-ready numeric features."""
+    df = transactions.copy()
+    df["timestamp"] = pd.to_datetime(df["timestamp"])
+    df = df.sort_values(["user_id", "timestamp"]).reset_index(drop=True)
+
+    df["hour"] = df["timestamp"].dt.hour
+    df["day_of_week"] = df["timestamp"].dt.dayofweek
+    df["tx_count_24h"] = (
+        df.groupby("user_id").rolling("24h", on="timestamp")["tx_id"].count().values
+    )
+
+    df["avg_spend_user"] = df.groupby("user_id")["amount"].transform(
+        lambda spend: spend.shift(1).expanding().mean()
+    )
+    df["amount_ratio"] = np.where(
+        df["avg_spend_user"] > 0,
+        df["amount"] / df["avg_spend_user"],
+        0,
+    )
+
+    df["prev_lat"] = df.groupby("user_id")["lat"].shift(1)
+    df["prev_lon"] = df.groupby("user_id")["lon"].shift(1)
+    df["prev_ts"] = df.groupby("user_id")["timestamp"].shift(1)
+
+    df["dist_from_last_tx_km"] = haversine_km(
+        df["lat"],
+        df["lon"],
+        df["prev_lat"],
+        df["prev_lon"],
+    ).fillna(0)
+
+    hours_since_previous = (
+        (df["timestamp"] - df["prev_ts"]).dt.total_seconds().div(3600).clip(lower=1e-3)
+    )
+    df["travel_velocity_kmph"] = df["dist_from_last_tx_km"] / hours_since_previous
+
+    df["auth_method"] = pd.Categorical(df["auth_method"], categories=AUTH_METHODS)
+    df["category"] = pd.Categorical(df["category"], categories=CATEGORIES)
+    df = pd.get_dummies(
+        df,
+        columns=["auth_method", "category"],
+        drop_first=True,
+        dtype=int,
+    )
+
+    df = df.drop(columns=NON_MODEL_COLUMNS)
+
+    for column in FEATURE_COLUMNS:
+        if column not in df.columns:
+            df[column] = 0
+
+    numeric_columns = df.select_dtypes(include="number").columns
+    df[numeric_columns] = df[numeric_columns].fillna(0)
+
+    return df[FEATURE_COLUMNS + [TARGET_COLUMN]]
 
 
 def feature_engineer(
-    csv_name: str | None = "simulated_transactions_seed_42.csv",
+    csv_name: str = "simulated_transactions_seed_42.csv",
 ) -> pd.DataFrame:
-    """
-    Docstring for feature_engineer
+    """Engineer raw transactions and save model-ready features."""
+    seed = seed_from_filename(csv_name)
+    transactions = load_transactions(csv_name)
+    features = engineer_transaction_features(transactions)
 
-    :param csv_name: Just put the name of the csv file that is generated from
-    the data generation step, it should be in the format
-    'simulated_transactions_seed_XX.csv' where XX is the seed number
-    used in data generation. The csv file should be located in
-    artifacts/data folder.
-
-    :type csv_name: str | None
-    """
-
-    # ---------------------------------------------------------------------------------------------
-    # --- Getting the output path ready ---
-    # ---------------------------------------------------------------------------------------------
-
-    # Extract version number from file name for saving
-    file_text = csv_name
-    curr_ver = __import__("re").search(r"_seed_(\d+)", file_text).group(1)
-
-    # Create directory to save the csv
-    OUTPUT_DIR = Path(__file__).resolve().parents[2] / "data" / "features"
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    OUTPUT_PATH = OUTPUT_DIR / f"fraud_features_seed_{curr_ver}.csv"
-
-    # ----------------------------------------------------------------------------------------------
-    # --- Load csv (for string path) ---
-    # ----------------------------------------------------------------------------------------------
-
-    def load_data(csv_name: str) -> pd.DataFrame:
-        ROOT_DIR = Path(__file__).resolve().parents[2]
-        FILE_PATH = ROOT_DIR / "data" / "simulated" / csv_name
-
-        df = pd.read_csv(FILE_PATH)
-
-        return df
-
-    df = load_data(csv_name)
-
-    # -----------------------------------------------------------------------------------------------
-    # --- Define Helper functions ---
-    # -----------------------------------------------------------------------------------------------
-
-    # Haversine Distance (km)
-
-    def haversine(lat1, lon1, lat2, lon2):
-        """
-        Docstring for haversine
-
-        :param lat1: Latitude of first coordinate in degrees
-        :param lon1: Longitude of first coordinate in degrees
-        :param lat2: Latitude of second coordinate in degrees
-        :param lon2: Longitude of second coordinate in degrees
-        """
-
-        """
-        Calculate distance between two coordinates on Earth.
-        Inputs are in degrees. Output is in kilometers.
-        """
-
-        R = 6371.0  # Earth radius in km
-
-        lat1 = np.radians(lat1)
-        lon1 = np.radians(lon1)
-        lat2 = np.radians(lat2)
-        lon2 = np.radians(lon2)
-
-        dlat = lat2 - lat1
-        dlon = lon2 - lon1
-
-        a = np.sin(dlat / 2) ** 2 + np.cos(lat1) * np.cos(lat2) * np.sin(dlon / 2) ** 2
-        c = 2 * np.arcsin(np.sqrt(a))
-
-        return R * c
-
-    # -----------------------------------------------------------------------------------------------
-    # --- Define the function ---
-    # -----------------------------------------------------------------------------------------------
-
-    def engineer_features(df: pd.DataFrame) -> pd.DataFrame:
-        """
-        Docstring for engineer_features
-
-        :param df: Load the csv into a dataframe
-        :return: Model ready features
-        :rtype: DataFrame
-        """
-
-        """
-        Just feature for the model and system
-        """
-
-        # --------------------------------------------------------------------------------------------
-        # --- 0. Initial preprocessing ---
-        # --------------------------------------------------------------------------------------------
-
-        # Convert 'timestamp' to datetime
-        df["timestamp"] = pd.to_datetime(df["timestamp"])
-
-        # Ensure correct ordering - critical for time-based features
-        df = df.sort_values(["user_id", "timestamp"]).reset_index(drop=True)
-
-        # --------------------------------------------------------------------------------------------
-        # 1. Time-based features
-        # --------------------------------------------------------------------------------------------
-        # Extract hour of day and day of week
-
-        df["hour"] = df["timestamp"].dt.hour
-        df["day_of_week"] = df["timestamp"].dt.dayofweek
-
-        # --------------------------------------------------------------------------------------------
-        # 2. Transaction velocity
-        # --------------------------------------------------------------------------------------------
-
-        # Number of transactions in the past 24 hours per user
-
-        counts = (
-            df.groupby("user_id").rolling("24h", on="timestamp")["tx_id"].count().values
-        )
-
-        # Then assign it back to a column
-        df["tx_count_24h"] = counts
-
-        # --------------------------------------------------------------------------------------------
-        # 3. Behavioral features
-        # --------------------------------------------------------------------------------------------
-
-        # Calculate average spend per user up to (but not including) current transaction
-
-        df["avg_spend_user"] = df.groupby("user_id")["amount"].transform(
-            lambda x: x.shift(1).expanding().mean()
-        )
-
-        # Calculate amount ratio to average spend
-
-        df["amount_ratio"] = np.where(
-            df["avg_spend_user"] > 0, df["amount"] / df["avg_spend_user"], 0
-        )
-
-        # --------------------------------------------------------------------------------------------
-        # 4. Geospatial features
-        # --------------------------------------------------------------------------------------------
-
-        # Previous transaction coordinates and timestamp
-
-        df["prev_lat"] = df.groupby("user_id")["lat"].shift(1)
-        df["prev_lon"] = df.groupby("user_id")["lon"].shift(1)
-        df["prev_ts"] = df.groupby("user_id")["timestamp"].shift(1)
-
-        # Distance from previous transaction (km) using Haversine formula
-
-        df["dist_from_last_tx_km"] = haversine(
-            df["lat"], df["lon"], df["prev_lat"], df["prev_lon"]
-        ).fillna(0)
-
-        # Calculate time difference in hours
-
-        time_diff_hours = (
-            (df["timestamp"] - df["prev_ts"])
-            .dt.total_seconds()
-            .div(3600)
-            .clip(lower=1e-3)
-        )
-
-        # Calculate travel velocity (km/h) - handle division by zero
-
-        df["travel_velocity_kmph"] = np.where(
-            time_diff_hours != 0, df["dist_from_last_tx_km"] / time_diff_hours, 0
-        )
-
-        # --------------------------------------------------------------------------------------------
-        # 5. Categorical encoding
-        # --------------------------------------------------------------------------------------------
-
-        df = pd.get_dummies(df, columns=["auth_method", "category"], drop_first=True)
-
-        # --------------------------------------------------------------------------------------------
-        # 6. Drop non-model columns
-        # --------------------------------------------------------------------------------------------
-
-        df = df.drop(
-            columns=[
-                "tx_id",
-                "prev_lat",
-                "prev_lon",
-                "prev_ts",
-                "timestamp",
-                "user_id",
-                "device_id",
-                "ip_address",
-            ]
-        )
-
-        # --------------------------------------------------------------------------------------------
-        # 7. Final numeric safety
-        # --------------------------------------------------------------------------------------------
-
-        num_cols = df.select_dtypes(include="number").columns
-        df[num_cols] = df[num_cols].fillna(0)
-
-        return df
-
-    # ================================================================================================================
-    # --- Save the features ---
-    # ================================================================================================================
-
-    df_features = engineer_features(df)
-
-    # Save to CSV
-    df_features.to_csv(OUTPUT_PATH, index=False)
-
-    # Print the file Path
-    print("=" * 70)
-
-    # Print the name of the csv file
-    print(f"Name of the csv file: 'fraud_features_seed_{curr_ver}.csv'")
-
-    print()
-
-    # Print the csv file location
-    print(f"Features saved at: {OUTPUT_DIR}")
-
-    print()
-
-    # Print the number of rows and columns after feature engineering
-    print(f"No of rows: {df_features.shape[0]}")
-    print(f"No of columns: {df_features.shape[1]}")
+    output_dir = ensure_directory(FEATURE_DATA_DIR)
+    output_path = output_dir / f"fraud_features_seed_{seed}.csv"
+    features.to_csv(output_path, index=False)
 
     print("=" * 70)
+    print(f"Saved features  : {output_path.name}")
+    print(f"Output directory: {output_dir}")
+    print(f"Rows            : {features.shape[0]}")
+    print(f"Columns         : {features.shape[1]}")
+    print("=" * 70)
 
-    return df_features
+    return features
