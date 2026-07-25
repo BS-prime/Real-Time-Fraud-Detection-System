@@ -1,28 +1,178 @@
-# ---------------------------------------------------------------------------------------------------====
-# --- Imports ---
-# ---------------------------------------------------------------------------------------------------====
+"""
+Batch drift monitoring with Evidently.
+"""
 
-import joblib
-import pandas as pd
+import logging
 from datetime import datetime, timezone
 from pathlib import Path
-import re
 
-import xgboost as xgb
-
-from evidently.report import Report
+import pandas as pd
 from evidently import ColumnMapping
 from evidently.metric_preset import (
     DataDriftPreset,
     DataQualityPreset,
     TargetDriftPreset,
 )
-from .feature_engineering import feature_engineer
+from evidently.report import Report
+
+from fraud_detection.feature_engineering import feature_engineer
+from fraud_detection.feature_schema import TARGET_COLUMN
+from fraud_detection.model_io import (
+    align_features_to_model,
+    load_model,
+    predict_fraud_probability,
+)
+from fraud_detection.naming import seed_from_filename
+from fraud_detection.paths import (
+    FEATURE_DATA_DIR,
+    MODEL_DIR,
+    REPORTS_DIR,
+    SIMULATED_DATA_DIR,
+    ensure_directory,
+)
+
+logger = logging.getLogger(__name__)
 
 
-# ---------------------------------------------------------------------------------------------------====
-# --- Core Monitoring Function ---
-# ---------------------------------------------------------------------------------------------------====
+class DriftMonitor:
+    """Generate drift monitoring reports and translate drift scores."""
+
+    def __init__(
+        self,
+        model_dir: Path = MODEL_DIR,
+        feature_dir: Path = FEATURE_DATA_DIR,
+        simulated_dir: Path = SIMULATED_DATA_DIR,
+        reports_dir: Path = REPORTS_DIR,
+    ) -> None:
+        self.model_dir = model_dir
+        self.feature_dir = feature_dir
+        self.simulated_dir = simulated_dir
+        self.reports_dir = reports_dir
+
+    def load_model_ready_dataset(self, dataset_name: str) -> pd.DataFrame:
+        feature_path = self.feature_dir / dataset_name
+        if feature_path.exists():
+            return pd.read_csv(feature_path)
+
+        seed = seed_from_filename(dataset_name)
+        derived_feature_path = self.feature_dir / f"fraud_features_seed_{seed}.csv"
+        if derived_feature_path.exists():
+            return pd.read_csv(derived_feature_path)
+
+        simulated_path = self.simulated_dir / dataset_name
+        if simulated_path.exists():
+            return feature_engineer(dataset_name)
+
+        raise FileNotFoundError(
+            f"Could not find '{dataset_name}' in {self.feature_dir} or {self.simulated_dir}."
+        )
+
+    @staticmethod
+    def split_dataset(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.Series]:
+        return df.drop(columns=[TARGET_COLUMN]), df[TARGET_COLUMN]
+
+    @staticmethod
+    def drift_status(drift_score: float, fail_threshold: float) -> str:
+        if drift_score >= fail_threshold:
+            return "CRITICAL: retraining recommended"
+        if drift_score >= fail_threshold * 0.6:
+            return "WARNING: review drift report"
+        return "OK: no action needed"
+
+    @staticmethod
+    def _drift_score(report: Report) -> float:
+        report_dict = report.as_dict()
+        drift_flags = [
+            metric["result"]["drift_detected"]
+            for metric in report_dict.get("metrics", [])
+            if isinstance(metric.get("result"), dict)
+            and "drift_detected" in metric["result"]
+        ]
+        return sum(drift_flags) / len(drift_flags) if drift_flags else 0.0
+
+    def generate_monitoring_report(
+        self,
+        model_name: str,
+        trained_dataset: str,
+        new_dataset: str,
+        drift_fail_threshold: float | None = 0.5,
+    ) -> dict[str, float | str]:
+        fail_threshold = 0.5 if drift_fail_threshold is None else drift_fail_threshold
+        model = load_model(self.model_dir / model_name)
+
+        reference_df = self.load_model_ready_dataset(trained_dataset)
+        current_df = self.load_model_ready_dataset(new_dataset)
+
+        X_reference, y_reference = self.split_dataset(reference_df)
+        X_current, y_current = self.split_dataset(current_df)
+        X_reference = align_features_to_model(
+            X_reference,
+            model,
+            fallback_columns=list(X_reference.columns),
+        )
+        X_current = align_features_to_model(
+            X_current,
+            model,
+            fallback_columns=list(X_reference.columns),
+        )
+
+        reference = X_reference.copy()
+        current = X_current.copy()
+        target_col = "__target__"
+        prediction_col = "__prediction__"
+
+        reference[target_col] = y_reference.values
+        current[target_col] = y_current.values
+        reference[prediction_col] = predict_fraud_probability(model, X_reference)
+        current[prediction_col] = predict_fraud_probability(model, X_current)
+
+        numerical_features = X_reference.select_dtypes(
+            include=["number"]
+        ).columns.tolist()
+        categorical_features = X_reference.select_dtypes(
+            include=["object", "category", "bool"]
+        ).columns.tolist()
+
+        report = Report(
+            metrics=[
+                DataDriftPreset(),
+                DataQualityPreset(),
+                TargetDriftPreset(),
+            ]
+        )
+        report.run(
+            reference_data=reference,
+            current_data=current,
+            column_mapping=ColumnMapping(
+                target=target_col,
+                prediction=prediction_col,
+                numerical_features=numerical_features,
+                categorical_features=categorical_features,
+            ),
+        )
+
+        reports_dir = ensure_directory(self.reports_dir / "drift_monitoring")
+        ref_version = Path(trained_dataset).stem
+        current_version = Path(new_dataset).stem
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+        report_path = (
+            reports_dir
+            / f"drift_report_{current_version}_vs_{ref_version}_{timestamp}.html"
+        )
+        report.save_html(report_path.as_posix())
+
+        score = self._drift_score(report)
+        status = self.drift_status(score, fail_threshold)
+
+        logger.info("Drift monitoring status: %s", status)
+        logger.info("Drift score: %.2f", score)
+        logger.info("Saved drift report to %s", report_path.resolve())
+
+        return {
+            "status": status,
+            "drift_score": score,
+            "report_path": str(report_path.resolve()),
+        }
 
 
 def generate_monitoring_report(
@@ -30,242 +180,10 @@ def generate_monitoring_report(
     trained_dataset: str,
     new_dataset: str,
     drift_fail_threshold: float | None = 0.5,
-):
-    """
-    Docstring for generate_monitoring_report
-
-    :param model_name: Just pick a model for which you want check drift
-    :type model_name: str
-    :param trained_dataset: The dataset in which current model is trained on
-    :type trained_dataset: str
-    :param new_dataset: The new dataset
-    :type new_dataset: str
-    :param drift_fail_threshold: Just a number
-    :type drift_fail_threshold: float | None
-    """
-
-    # ---------------------------------------------------------------------------------------------------
-    # --- Defining some helper functions ---
-    # ---------------------------------------------------------------------------------------------------
-    '''
-    All of this function exists to help with making model prediction.
-    '''
-    def _seed_from_name(name: str) -> str | None:
-        match = re.search(r"_seed_(\d+)", name)
-        return match.group(1) if match else None
-
-    # This function load dataset correspoding to the user input
-    def _load_model_ready_dataset(
-        dataset_name: str, project_root: Path
-    ) -> pd.DataFrame:
-        # If you put a pre-engineered file directly.
-        feature_path = project_root / "data" / "features" / dataset_name
-        if feature_path.exists():
-            return pd.read_csv(feature_path)
-
-        # If you put a simulated file, let's try to find corresponding engineered file.
-        seed = _seed_from_name(dataset_name)
-        if seed:
-            derived_name = f"fraud_features_seed_{seed}.csv"
-            derived_path = project_root / "data" / "features" / derived_name
-            if derived_path.exists():
-                return pd.read_csv(derived_path)
-
-        # Fallback: Perform feauture engineering
-        simulated_path = project_root / "data" / "simulated" / dataset_name
-        if simulated_path.exists():
-            return feature_engineer(dataset_name)
-
-        raise FileNotFoundError(
-            f"Could not find '{dataset_name}' in data/features or data/simulated."
-        )
-
-    def _model_feature_names(model) -> list[str] | None:
-        if hasattr(model, "feature_names_in_"):
-            return [str(col) for col in model.feature_names_in_]
-        if isinstance(model, xgb.Booster) and model.feature_names:
-            return [str(col) for col in model.feature_names]
-        return None
-
-    def _align_features_to_model(X: pd.DataFrame, model) -> pd.DataFrame:
-        expected = _model_feature_names(model)
-        X = X.copy()
-        X.columns = X.columns.astype(str)
-
-        if not expected:
-            return X
-
-        for col in expected:
-            if col not in X.columns:
-                X[col] = 0
-
-        return X.reindex(columns=expected, fill_value=0)
-
-    # Different predict function for different models
-    def _predict_scores(model, X: pd.DataFrame):
-        if hasattr(model, "predict_proba"):
-            return model.predict_proba(X)[:, 1]
-        if isinstance(model, xgb.Booster):
-            return model.predict(xgb.DMatrix(X))
-        return model.predict(X)
-
-    # ---------------------------------------------------------------------------------------------------
-    # --- 0. Defining path ---
-    # ---------------------------------------------------------------------------------------------------
-
-    # Locate the project root
-    PROJECT_ROOT = Path(__file__).resolve().parents[2]
-
-    # Create the output directory
-    REPORTS_DIR = PROJECT_ROOT / "reports" / "drift_monitoring"
-    REPORTS_DIR.mkdir(parents=True, exist_ok=True)
-
-    # Model Path
-    MODEL_PATH = PROJECT_ROOT / "artifacts" / "models" / model_name
-
-    # Load model
-    try:
-        model = joblib.load(MODEL_PATH)
-    except:
-        model = xgb.Booster()
-        model.load_model(str(MODEL_PATH))
-
-    # ---------------------------------------------------------------------------------------------------
-    # --- 1. Normalize inputs ---
-    # ---------------------------------------------------------------------------------------------------
-
-    # Load model-ready datasets.
-    df_reference = _load_model_ready_dataset(trained_dataset, PROJECT_ROOT)
-    df_current = _load_model_ready_dataset(new_dataset, PROJECT_ROOT)
-
-    # Selecting the features
-    X_reference = df_reference.drop(columns=["is_fraud"])
-    X_current = df_current.drop(columns=["is_fraud"])
-
-    # Selecting the target
-    y_reference = df_reference["is_fraud"]
-    y_current = df_current["is_fraud"]
-
-    # Get the column names
-    X_reference.columns = X_reference.columns.astype(str)
-    X_current.columns = X_current.columns.astype(str)
-    X_reference = _align_features_to_model(X_reference, model)
-    X_current = _align_features_to_model(X_current, model)
-
-    # Separating the numerical and categorical features
-    numerical_features = X_reference.select_dtypes(
-        include=["int64", "float64"]
-    ).columns.tolist()
-    categorical_features = X_reference.select_dtypes(
-        include=["object", "category", "bool"]
-    ).columns.tolist()
-
-    # ---------------------------------------------------------------------------------------------------
-    # --- 2. Inclusion of target and prediction columns ---
-    # ---------------------------------------------------------------------------------------------------
-
-    # Copy the features to a new DataFrame
-    reference = X_reference.copy()
-    current = X_current.copy()
-
-    # Create empty columns for target and prediction
-    target_col = "__target__"
-    prediction_col = "__prediction__"
-
-    # Fill the empty columns
-    if target_col:
-        reference[target_col] = y_reference.values
-        current[target_col] = y_current.values
-
-    reference[prediction_col] = _predict_scores(model, X_reference)
-    current[prediction_col] = _predict_scores(model, X_current)
-
-    # ---------------------------------------------------------------------------------------------------
-    # --- 3. Column mapping ---
-    # ---------------------------------------------------------------------------------------------------
-
-    # Let evidently know what type of columns he is dealing with
-    column_mapping = ColumnMapping(
-        target=target_col,
-        numerical_features=numerical_features,
-        categorical_features=categorical_features,
-        prediction=prediction_col,
+) -> dict[str, float | str]:
+    return DriftMonitor().generate_monitoring_report(
+        model_name=model_name,
+        trained_dataset=trained_dataset,
+        new_dataset=new_dataset,
+        drift_fail_threshold=drift_fail_threshold,
     )
-
-    # ---------------------------------------------------------------------------------------------------
-    # --- 4. Metrics ---
-    # ---------------------------------------------------------------------------------------------------
-
-    # Let evidently know what it should measure
-    metrics = [DataDriftPreset(), DataQualityPreset(), TargetDriftPreset()]
-
-    # ---------------------------------------------------------------------------------------------------
-    # --- 5. Run Evidently ---
-    # ---------------------------------------------------------------------------------------------------
-
-    # Create a nice report :)
-    report = Report(metrics=metrics)
-
-    report.run(
-        reference_data=reference,
-        current_data=current,
-        column_mapping=column_mapping,
-    )
-
-    # ---------------------------------------------------------------------------------------------------
-    # --- 6. Save report (HTML) ---
-    # ---------------------------------------------------------------------------------------------------
-
-    # Preserving version names for clearity
-    ref_ver = Path(trained_dataset).stem
-
-    # Same thing for current
-    curr_ver = Path(new_dataset).stem
-
-    # Define the report path with timestamps
-    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-    report_path = REPORTS_DIR / f"drift_report_{curr_ver}_vs_{ref_ver}_{timestamp}.html"
-
-    # Save the report
-    report.save_html(report_path.as_posix())
-
-    # Verify the report was written
-    assert report_path.exists(), "HTML report was NOT written"
-
-    # ---------------------------------------------------------------------------------------------------
-    # --- 7. Drift score ---
-    # ---------------------------------------------------------------------------------------------------
-
-    report_dict = report.as_dict()
-
-    drift_flags = [
-        m["result"]["drift_detected"]
-        for m in report_dict.get("metrics", [])
-        if isinstance(m.get("result"), dict) and "drift_detected" in m["result"]
-    ]
-
-    drift_score = sum(drift_flags) / len(drift_flags) if drift_flags else 0.0
-
-    # ---------------------------------------------------------------------------------------------------
-    # --- 8. Status ---
-    # ---------------------------------------------------------------------------------------------------
-
-    if drift_score >= drift_fail_threshold:
-        status = "CRITICAL FAILURE!!! RETRAIN IMMEDIATELY"
-    elif drift_score >= drift_fail_threshold * 0.6:
-        status = "WARNING!!! attention required."
-    else:
-        status = "No action needed!!!"
-
-    print("====================================")
-    print("Data and Target Drift Monitoring")
-    print(f"Status      : {status}")
-    print(f"Drift score : {drift_score:.2f}")
-    print(f"Report      : {report_path.resolve()}")
-    print("====================================")
-
-    return {
-        "status": status,
-        "drift_score": drift_score,
-        "report_path": str(report_path.resolve()),
-    }

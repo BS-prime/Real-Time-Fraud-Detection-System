@@ -141,7 +141,7 @@ Captured response highlights from the screenshot:
 | Fallbacks shown | `DEFAULT_TIME_DELTA_USED`; `GLOBAL_AVG_SPEND_USED`; `DEFAULT_LOCATION_HISTORY_USED` |
 | Timing shown | `0.0216585s` after the successful call; an earlier attempt shows `0.0486081s` next to a `WebCmdletWebResponseException` |
 
-Note: the screenshot payload includes legacy smoke-test fields such as `device_id`, `feature_3`, `feature_4`, `feature_7`, and `feature_8`. The current FastAPI schema requires `lat` and `lon`; use the reproducible request below for this codebase.
+Note: the screenshot payload includes legacy smoke-test fields such as `device_id`, `feature_3`, `feature_4`, `feature_7`, and `feature_8`. Use the reproducible request below for the current FastAPI schema.
 
 ## Project Structure
 
@@ -177,8 +177,18 @@ Note: the screenshot payload includes legacy smoke-test fields such as `device_i
 |   `-- drift_report_20260201_071922.html
 |-- src/
 |   |-- api/
+|   |   |-- config.py
+|   |   |-- dependencies.py
+|   |   |-- routes.py
+|   |   |-- schemas.py
+|   |   |-- services.py
 |   |   `-- main.py
 |   `-- fraud_detection/
+|       |-- paths.py
+|       |-- naming.py
+|       |-- feature_schema.py
+|       |-- geo.py
+|       |-- model_io.py
 |       |-- data_ingestion.py
 |       |-- feature_engineering.py
 |       |-- model_training.py
@@ -195,6 +205,15 @@ Note: the screenshot payload includes legacy smoke-test fields such as `device_i
 ```
 
 Generated data, model artifacts, model evaluation outputs, SHAP reports, and drift-monitoring outputs are ignored by Git through `.gitignore`. If these files are missing after cloning, regenerate them with the training pipeline.
+
+## Code Map for Beginners
+
+- `paths.py` keeps filesystem locations in one place.
+- `feature_schema.py` defines the exact model feature order used by training, tests, and the API.
+- `geo.py` contains the Haversine distance calculation.
+- `model_io.py` handles model loading, feature alignment, threshold loading, and prediction.
+- `src/api` follows a small FastAPI layout: schemas, service logic, dependencies, routes, and app creation.
+- The pipeline modules then read like stages: generate data, engineer features, train, optimize the threshold, evaluate, and monitor.
 
 ## Tech Stack
 
@@ -246,6 +265,12 @@ Health check:
 http://localhost:8000/
 ```
 
+Readiness check:
+
+```text
+http://localhost:8000/health/ready
+```
+
 Interactive API documentation:
 
 ```text
@@ -260,8 +285,8 @@ http://localhost:8000/docs
 | --- | --- | --- | --- |
 | `user_id` | string | yes | Used to look up mock user history |
 | `amount` | float | yes | Must be greater than `0` |
-| `lat` | float or null | yes | Must be between `-90` and `90` |
-| `lon` | float or null | yes | Must be between `-180` and `180` |
+| `lat` | float or null | no | Must be between `-90` and `90`; falls back to user history or default location |
+| `lon` | float or null | no | Must be between `-180` and `180`; falls back to user history or default location |
 | `auth_method` | string | yes | One of `Biometric`, `PIN`, `Password` |
 | `category` | string | yes | One of `food`, `grocery`, `tech`, `travel`, `utilities`, `entertainment` |
 | `time_delta_min` | float or null | no | Defaults to `6.0` minutes when missing |
@@ -294,22 +319,20 @@ $Response
 Write-Host "`nTotal Time: $($TimeTaken.TotalSeconds)s"
 ```
 
-Current response from the local model artifacts:
+Example response shape from the local model artifacts. The probability can vary with current hour/day features:
 
 ```json
 {
   "model_version": "XGBoost_v:1.0",
-  "fraud_probability": 0.0101,
+  "fraud_probability": 0.0133,
   "risk_band": "LOW",
   "recommended_action": "ALLOW",
   "decision_reasons": [
     "Transaction amount significantly higher than user's normal spending",
-    "Extreme deviation from user spending behavior"
+    "Extreme deviation from normal transaction behavior"
   ],
   "fallbacks_used": [
-    "DEFAULT_TIME_DELTA_USED",
-    "GLOBAL_AVG_SPEND_USED",
-    "NO_LOCATION_HISTORY"
+    "DEFAULT_TIME_DELTA_USED"
   ]
 }
 ```
@@ -384,6 +407,7 @@ Current tests cover:
 
 - Model predictions stay within a valid probability range.
 - Fraud risk does not drop unexpectedly when the transaction amount increases sharply.
+- The shared feature schema still matches the model width.
 
 ## Monitoring
 

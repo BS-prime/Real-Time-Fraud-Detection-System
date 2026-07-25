@@ -1,151 +1,134 @@
-# ==========================================================================
-# --- Import Libraries ---
-# ==========================================================================
+"""Model training utilities."""
 
-# Data manupulation
-import pandas as pd
-
-# Utils
-import re
-import yaml
-import joblib
+import logging
+import random
 from pathlib import Path
+from typing import Any
 
-# Preprocessing
-from sklearn.model_selection import train_test_split, GridSearchCV
-
-# Algo
+import joblib
+import pandas as pd
 import xgboost as xgb
+import yaml
 from sklearn.ensemble import RandomForestClassifier
+from sklearn.model_selection import GridSearchCV, train_test_split
+
+from fraud_detection.feature_schema import TARGET_COLUMN
+from fraud_detection.naming import seed_from_filename
+from fraud_detection.paths import (
+    CONFIG_PATH,
+    FEATURE_DATA_DIR,
+    MODEL_DIR,
+    ensure_directory,
+)
+
+logger = logging.getLogger(__name__)
+
+MODEL_TYPES = {
+    "RandomForestClassifier": RandomForestClassifier,
+    "XGBClassifier": xgb.XGBClassifier,
+}
 
 
-# =================================================================================================================
-# --- Define the actual function ---
-# =================================================================================================================
+class ModelTrainer:
+    """
+    Train fraud detection models using configured hyperparameters.
+    """
+
+    def __init__(
+        self,
+        config_path: Path = CONFIG_PATH,
+        feature_dir: Path = FEATURE_DATA_DIR,
+        model_dir: Path = MODEL_DIR,
+    ) -> None:
+        self.config_path = config_path
+        self.feature_dir = feature_dir
+        self.model_dir = model_dir
+        self.config = self._load_config()
+
+    def _load_config(self) -> dict[str, Any]:
+        if not self.config_path.exists():
+            raise FileNotFoundError(
+                f"Training configuration not found: {self.config_path}"
+            )
+
+        with self.config_path.open("r", encoding="utf-8") as file:
+            return yaml.safe_load(file)
+
+    def _load_training_data(self, csv_name: str) -> pd.DataFrame:
+        csv_path = self.feature_dir / csv_name
+        if not csv_path.exists():
+            raise FileNotFoundError(f"Feature file not found: {csv_path}")
+        return pd.read_csv(csv_path)
+
+    def _split_features_and_target(
+        self, df: pd.DataFrame
+    ) -> tuple[pd.DataFrame, pd.Series]:
+        return df.drop(columns=[TARGET_COLUMN]), df[TARGET_COLUMN]
+
+    def _build_estimator(self, model_type: str, seed: int) -> Any:
+        if model_type not in MODEL_TYPES:
+            supported = ", ".join(MODEL_TYPES)
+            raise ValueError(
+                f"Unsupported model type '{model_type}'. Supported: {supported}"
+            )
+        return MODEL_TYPES[model_type](random_state=seed)
+
+    @staticmethod
+    def _save_trained_model(model: Any, model_type: str, model_path: Path) -> None:
+        if model_type == "XGBClassifier":
+            model.save_model(str(model_path))
+        else:
+            joblib.dump(model, model_path)
+
+    def train(
+        self, csv_name: str = "fraud_features_seed_42.csv", algo_name: str = "xgboost"
+    ) -> tuple[pd.DataFrame, pd.Series]:
+        seed = seed_from_filename(csv_name)
+        df = self._load_training_data(csv_name)
+        features, target = self._split_features_and_target(df)
+
+        if algo_name not in self.config["models"]:
+            available = ", ".join(self.config["models"])
+            raise ValueError(
+                f"Unknown algo_name '{algo_name}'. Available models: {available}"
+            )
+
+        settings = self.config["models"][algo_name]
+        model_type = settings["type"]
+        estimator = self._build_estimator(model_type, seed)
+
+        X_train, X_test, y_train, y_test = train_test_split(
+            features,
+            target,
+            test_size=0.2,
+            stratify=target,
+            random_state=seed,
+        )
+
+        logger.info("Running GridSearch for %s", algo_name)
+        grid_search = GridSearchCV(
+            estimator,
+            settings["params"],
+            cv=4,
+            scoring="average_precision",
+        )
+        grid_search.fit(X_train, y_train)
+
+        output_dir = ensure_directory(self.model_dir)
+        model_path = output_dir / f"{algo_name}_seed_{seed}.json"
+        self._save_trained_model(grid_search.best_estimator_, model_type, model_path)
+
+        logger.info(
+            "Saved model %s with best score %.4f to %s",
+            model_path.name,
+            grid_search.best_score_,
+            output_dir,
+        )
+
+        return X_test, y_test
+
+
 def model_trainer(
-    csv_name: str | None = "fraud_features_seed_42.csv",
-    algo_name: str = "xgboost",
-) -> tuple:
-    """
-    Docstring for model_trainer
-
-    :param csv_name: Just put the name of the csv file that is generated from
-    the feature engineering step, it should be in the format
-    'fraud_features_seed_XX.csv' where XX is the seed number
-    used in data generation. The csv file should be located in
-    data/features folder.
-
-    :type csv_name: str | None
-    :param algo_name: Model key from configs/config.yaml -> models section.
-    Example: "xgboost" or "RandomForest".
-    :type algo_name: str
-    """
-
-    # ----------------------------------------------------------------------------------------------------
-    # --- Path Declaration ---
-    # ----------------------------------------------------------------------------------------------------
-
-    # Get the csv
-    ROOT_DIR = Path(__file__).resolve().parents[2]
-    PATH_DIR = ROOT_DIR / "data" / "features" / csv_name
-
-    # Trained model output path
-    OUTPUT_DIR = ROOT_DIR / "artifacts" / "models"
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-
-    # Path to the yaml
-    CONFIG_PATH = ROOT_DIR / "configs" / "config.yaml"
-
-    # ----------------------------------------------------------------------------------------------------
-    # --- Read the data and extract the seed number ---
-    # ----------------------------------------------------------------------------------------------------
-
-    df = pd.read_csv(PATH_DIR)
-
-    # Define the target
-    y = df["is_fraud"]
-
-    # Define the features
-    X = df.drop(columns=["is_fraud"])
-
-    # Extract the seed number from the csv file
-    seed_val = int(re.search(r"_seed_(\d+)", csv_name).group(1))
-
-    # ----------------------------------------------------------------------------------------------------
-    # --- 1. Load Config ---
-    # ----------------------------------------------------------------------------------------------------
-
-    # Read the config file
-    with open(CONFIG_PATH, "r") as f:
-        config = yaml.safe_load(f)
-
-    # ----------------------------------------------------------------------------------------------------+
-    # --- 2. Map String names to actual Scikit-Learn Classes ---
-    # ----------------------------------------------------------------------------------------------------+
-
-    algo_map = {
-        "RandomForestClassifier": RandomForestClassifier,
-        "XGBClassifier": xgb.XGBClassifier,
-    }
-
-    # ----------------------------------------------------------------------------------------------------+
-    # --- 3. Data Setup ---
-    # ----------------------------------------------------------------------------------------------------+
-
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=0.2, stratify=y, random_state=42
-    )
-
-    # ----------------------------------------------------------------------------------------------------+
-    # --- 4. Train the Selected Model ---
-    # ----------------------------------------------------------------------------------------------------+
-
-    # Handling unknown algo error
-    if algo_name not in config["models"]:
-        available_models = ", ".join(config["models"].keys())
-        raise ValueError(
-            f"Unknown algo_name '{algo_name}'. Available models: {available_models}"
-        )
-
-    settings = config["models"][algo_name]
-    model_type = settings["type"]
-
-    
-    if model_type not in algo_map:
-        available_types = ", ".join(algo_map.keys())
-        raise ValueError(
-            f"Unsupported model type '{model_type}' for '{algo_name}'. "
-            f"Supported types: {available_types}"
-        )
-
-    print(f"Running GridSearch for: {algo_name}")
-
-    # Initialize the specific class
-    base_model = algo_map[model_type](random_state=seed_val)
-
-    # Setup GridSearch
-    grid = GridSearchCV(
-        base_model, settings["params"], cv=4, scoring="average_precision"
-    )
-
-    # Train the model
-    grid.fit(X_train, y_train)
-
-    # Get the best model
-    best_model = grid.best_estimator_
-
-    # Saving the model with a unique name
-    MODEL_PATH = OUTPUT_DIR / f"{algo_name}_seed_{seed_val}.json"
-
-    # Save the model
-    if model_type == "XGBClassifier":
-        best_model.save_model(str(MODEL_PATH))
-    else:
-        joblib.dump(best_model, MODEL_PATH)
-
-    print("=" * 70)
-    print(f"Model Name: '{algo_name}_seed_{seed_val}.json'")
-    print(f"Best Score: {grid.best_score_:.4f} | Saved to: {OUTPUT_DIR}")
-    print("=" * 70)
-
-    return X_test, y_test
+    csv_name: str = "fraud_features_seed_42.csv", algo_name: str = "xgboost"
+) -> tuple[pd.DataFrame, pd.Series]:
+    return ModelTrainer().train(csv_name=csv_name, algo_name=algo_name)

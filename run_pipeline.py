@@ -1,5 +1,7 @@
-from fraud_detection import run_training_pipeline
+"""Run the default fraud detection training pipeline."""
+
+from fraud_detection.training_pipeline import run_training_pipeline
+
 
 if __name__ == "__main__":
-
-    results= run_training_pipeline(algo_name='xgboost')
+    run_training_pipeline(algo_name="xgboost")
