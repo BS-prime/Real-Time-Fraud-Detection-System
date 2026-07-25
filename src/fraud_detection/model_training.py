@@ -1,11 +1,14 @@
 """Model training utilities."""
 
+import logging
+import random
+from pathlib import Path
 from typing import Any
 
+import joblib
 import pandas as pd
 import xgboost as xgb
 import yaml
-import joblib
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import GridSearchCV, train_test_split
 
@@ -18,112 +21,114 @@ from fraud_detection.paths import (
     ensure_directory,
 )
 
+logger = logging.getLogger(__name__)
+
 MODEL_TYPES = {
     "RandomForestClassifier": RandomForestClassifier,
     "XGBClassifier": xgb.XGBClassifier,
 }
 
 
-def load_training_data(csv_name: str) -> pd.DataFrame:
-
+class ModelTrainer:
     """
-    Load a model-ready feature file from ``data/features``.
-    """
-
-    csv_path = FEATURE_DATA_DIR / csv_name
-    if not csv_path.exists():
-        raise FileNotFoundError(f"Feature file not found: {csv_path}")
-    return pd.read_csv(csv_path)
-
-
-def load_config() -> dict[str, Any]:
-    """
-    Read the YAML training configuration.
+    Train fraud detection models using configured hyperparameters.
     """
 
-    with CONFIG_PATH.open("r", encoding="utf-8") as file:
-        return yaml.safe_load(file)
+    def __init__(
+        self,
+        config_path: Path = CONFIG_PATH,
+        feature_dir: Path = FEATURE_DATA_DIR,
+        model_dir: Path = MODEL_DIR,
+    ) -> None:
+        self.config_path = config_path
+        self.feature_dir = feature_dir
+        self.model_dir = model_dir
+        self.config = self._load_config()
 
+    def _load_config(self) -> dict[str, Any]:
+        if not self.config_path.exists():
+            raise FileNotFoundError(
+                f"Training configuration not found: {self.config_path}"
+            )
 
-def split_features_and_target(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.Series]:
-    """
-    Separate model inputs from the fraud label.
-    """
+        with self.config_path.open("r", encoding="utf-8") as file:
+            return yaml.safe_load(file)
 
-    return df.drop(columns=[TARGET_COLUMN]), df[TARGET_COLUMN]
+    def _load_training_data(self, csv_name: str) -> pd.DataFrame:
+        csv_path = self.feature_dir / csv_name
+        if not csv_path.exists():
+            raise FileNotFoundError(f"Feature file not found: {csv_path}")
+        return pd.read_csv(csv_path)
 
+    def _split_features_and_target(
+        self, df: pd.DataFrame
+    ) -> tuple[pd.DataFrame, pd.Series]:
+        return df.drop(columns=[TARGET_COLUMN]), df[TARGET_COLUMN]
 
-def build_estimator(model_type: str, seed: int):
-    """
-    Create a supported estimator from its config name.
-    """
+    def _build_estimator(self, model_type: str, seed: int) -> Any:
+        if model_type not in MODEL_TYPES:
+            supported = ", ".join(MODEL_TYPES)
+            raise ValueError(
+                f"Unsupported model type '{model_type}'. Supported: {supported}"
+            )
+        return MODEL_TYPES[model_type](random_state=seed)
 
-    if model_type not in MODEL_TYPES:
-        supported = ", ".join(MODEL_TYPES)
-        raise ValueError(
-            f"Unsupported model type '{model_type}'. Supported: {supported}"
+    @staticmethod
+    def _save_trained_model(model: Any, model_type: str, model_path: Path) -> None:
+        if model_type == "XGBClassifier":
+            model.save_model(str(model_path))
+        else:
+            joblib.dump(model, model_path)
+
+    def train(
+        self, csv_name: str = "fraud_features_seed_42.csv", algo_name: str = "xgboost"
+    ) -> tuple[pd.DataFrame, pd.Series]:
+        seed = seed_from_filename(csv_name)
+        df = self._load_training_data(csv_name)
+        features, target = self._split_features_and_target(df)
+
+        if algo_name not in self.config["models"]:
+            available = ", ".join(self.config["models"])
+            raise ValueError(
+                f"Unknown algo_name '{algo_name}'. Available models: {available}"
+            )
+
+        settings = self.config["models"][algo_name]
+        model_type = settings["type"]
+        estimator = self._build_estimator(model_type, seed)
+
+        X_train, X_test, y_train, y_test = train_test_split(
+            features,
+            target,
+            test_size=0.2,
+            stratify=target,
+            random_state=seed,
         )
-    return MODEL_TYPES[model_type](random_state=seed)
 
+        logger.info("Running GridSearch for %s", algo_name)
+        grid_search = GridSearchCV(
+            estimator,
+            settings["params"],
+            cv=4,
+            scoring="average_precision",
+        )
+        grid_search.fit(X_train, y_train)
 
-def save_trained_model(model, model_type: str, model_path) -> None:
-    """
-    Persist a trained model using the format expected by its library."""
+        output_dir = ensure_directory(self.model_dir)
+        model_path = output_dir / f"{algo_name}_seed_{seed}.json"
+        self._save_trained_model(grid_search.best_estimator_, model_type, model_path)
 
-    if model_type == "XGBClassifier":
-        model.save_model(str(model_path))
-    else:
-        joblib.dump(model, model_path)
+        logger.info(
+            "Saved model %s with best score %.4f to %s",
+            model_path.name,
+            grid_search.best_score_,
+            output_dir,
+        )
+
+        return X_test, y_test
 
 
 def model_trainer(
-    csv_name: str = "fraud_features_seed_42.csv",
-    algo_name: str = "xgboost",
+    csv_name: str = "fraud_features_seed_42.csv", algo_name: str = "xgboost"
 ) -> tuple[pd.DataFrame, pd.Series]:
-    """
-    Train the configured model and return the holdout test split.
-    """
-    
-    seed = seed_from_filename(csv_name)
-    df = load_training_data(csv_name)
-    features, target = split_features_and_target(df)
-    config = load_config()
-
-    if algo_name not in config["models"]:
-        available = ", ".join(config["models"])
-        raise ValueError(
-            f"Unknown algo_name '{algo_name}'. Available models: {available}"
-        )
-
-    settings = config["models"][algo_name]
-    model_type = settings["type"]
-    estimator = build_estimator(model_type, seed)
-
-    X_train, X_test, y_train, y_test = train_test_split(
-        features,
-        target,
-        test_size=0.2,
-        stratify=target,
-        random_state=seed,
-    )
-
-    print(f"Running GridSearch for: {algo_name}")
-    grid_search = GridSearchCV(
-        estimator,
-        settings["params"],
-        cv=4,
-        scoring="average_precision",
-    )
-    grid_search.fit(X_train, y_train)
-
-    output_dir = ensure_directory(MODEL_DIR)
-    model_path = output_dir / f"{algo_name}_seed_{seed}.json"
-    save_trained_model(grid_search.best_estimator_, model_type, model_path)
-
-    print("=" * 70)
-    print(f"Saved model: {model_path.name}")
-    print(f"Best score : {grid_search.best_score_:.4f}")
-    print(f"Output dir : {output_dir}")
-    print("=" * 70)
-
-    return X_test, y_test
+    return ModelTrainer().train(csv_name=csv_name, algo_name=algo_name)
