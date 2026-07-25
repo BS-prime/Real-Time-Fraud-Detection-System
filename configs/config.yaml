@@ -1,38 +1,34 @@
 # config.yaml
 models:
   
-  RandomForest: # This will be used in model naming after training.
+  RandomForest: 
     type: "RandomForestClassifier"
     params:
-      n_estimators: [500, 1000, 1500]                     # More trees help identify rare minority patterns
-      class_weight: ["balanced", "balanced_subsample"]    # Penalizes fraud misclassifications based on tree bootstrap samples
-      max_depth: [10, 15]                                 # Prevents memorizing noise in majority data
-      min_samples_leaf: [10]                              # Ensures leaves are statistically significant, reducing false positives
-      max_features: ["sqrt", "log2"]                      # Standard for diverse trees in ensemble
+      n_estimators: [500, 1000, 1500]                     
+      class_weight: ["balanced", "balanced_subsample"]    
+      max_depth: [10, 15]                                 
+      min_samples_leaf: [10]                              
+      max_features: ["sqrt", "log2"]                      
       bootstrap: [true]
-      n_jobs: [-1]                                   # Use all available CPU cores for speed
+      n_jobs: [-1]                                   
       
 
   xgboost: 
     type: "XGBClassifier"
     params:
       scale_pos_weight: [70.4]        
-      max_depth: [3, 6]                     # Shallow trees are more robust for rare events
-      min_child_weight: [10]                # Higher values prevent splitting on single fraud cases
-      gamma: [1.5]                          # Minimum loss reduction to split; adds conservatism
-      lambda: [2.0]                         # L2 regularization to keep leaf weights stable
-      alpha: [0.5]                          # L1 regularization for feature sparsity
-      subsample: [0.8]                      # Rows sampled per tree to increase robustness
-      colsample_bytree: [0.8]               # Features sampled per tree
-      learning_rate: [0.01]                 # Low rate + more estimators is better for fraud
-      n_estimators: [500, 1000, 1500]       # More trees to capture complex patterns
-      tree_method: ["hist" ]                # Faster training for large datasets
+      max_depth: [3, 6]                     
+      min_child_weight: [10]                
+      gamma: [1.5]                          
+      lambda: [2.0]                         
+      alpha: [0.5]                          
+      subsample: [0.8]                      
+      colsample_bytree: [0.8]               
+      learning_rate: [0.01]                 
+      n_estimators: [500, 1000, 1500]       
+      tree_method: ["hist" ]                
       
 
-
-
-
-evaluation:
-  # Crucial: Use Area Under Precision-Recall Curve for 1.4% imbalance            
+evaluation:    
   metrics: ["aucpr", "f1", "precision", "recall"]
   stratify: y

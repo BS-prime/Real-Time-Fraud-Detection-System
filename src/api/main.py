@@ -7,10 +7,15 @@ from .routes import router
 
 
 def create_app() -> FastAPI:
-    """Create and configure the FastAPI application."""
+    """
+    Create and configure the FastAPI application.
+    """
+
     settings = get_settings()
+
     app = FastAPI(title=settings.app_title, version=settings.app_version)
     app.include_router(router)
+
     return app
 
 

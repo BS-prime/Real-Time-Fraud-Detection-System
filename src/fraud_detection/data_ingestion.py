@@ -1,16 +1,9 @@
-"""Synthetic bank/card transaction data generation.
-
-The goal of this script is to create realistic-enough demo data.
-
-1. Create customer profiles.
-2. Generate mostly normal transactions.
-3. Inject a small number of fraud patterns.
-4. Save the CSV for the next pipeline step.
-"""
+"""Synthetic bank/card transaction data generation."""
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
+import logging
 import random
 
 import pandas as pd
@@ -19,8 +12,10 @@ from faker import Faker
 from fraud_detection.feature_schema import AUTH_METHODS
 from fraud_detection.paths import SIMULATED_DATA_DIR, ensure_directory
 
+logger = logging.getLogger(__name__)
+
 START_DATE = datetime(2026, 1, 1, 8, 0)
-FRAUD_RATE = 0.015
+DEFAULT_FRAUD_RATE = 0.015
 
 CITIES = [
     {"name": "New York", "country": "US", "lat": 40.7128, "lon": -74.0060},
@@ -64,146 +59,183 @@ class UserProfile:
 
     user_id: str
     segment: str
-    home_city: dict
+    home_city: dict[str, str | float]
     devices: list[str]
     avg_spend: float
     gap_minutes: int
     last_tx_time: datetime
 
 
-def create_user_profiles(
-    fake: Faker,
-    rng: random.Random,
-    n_users: int,
-) -> dict[str, UserProfile]:
-    """Create customers with a home location, devices, and spending profile."""
-    profiles = {}
+class TransactionSimulator:
+    """Generate realistic synthetic transactions for model training."""
 
-    for user_number in range(n_users):
-        segment = rng.choice(list(CUSTOMER_SEGMENTS))
-        segment_rules = CUSTOMER_SEGMENTS[segment]
-        user_id = f"user_{user_number}"
-
-        profiles[user_id] = UserProfile(
-            user_id=user_id,
-            segment=segment,
-            home_city=rng.choice(CITIES),
-            devices=[fake.uuid4()[:10] for _ in range(rng.randint(1, 3))],
-            avg_spend=segment_rules["avg_spend"],
-            gap_minutes=segment_rules["gap_minutes"],
-            last_tx_time=START_DATE + timedelta(days=rng.randint(0, 14)),
+    def __init__(
+        self,
+        n_users: int = 500,
+        seed: int = 42,
+        fraud_rate: float = DEFAULT_FRAUD_RATE,
+        output_dir: Path | str | None = None,
+    ) -> None:
+        self.n_users = n_users
+        self.seed = seed
+        self.fraud_rate = fraud_rate
+        self.output_dir = (
+            Path(output_dir) if output_dir is not None else SIMULATED_DATA_DIR
         )
+        self.fake = Faker()
+        self.fake.seed_instance(seed)
+        self.rng = random.Random(seed)
+        self.profiles = self._create_user_profiles()
 
-    return profiles
+    def _create_user_profiles(self) -> dict[str, UserProfile]:
+        profiles: dict[str, UserProfile] = {}
 
+        for user_number in range(self.n_users):
+            segment = self.rng.choice(list(CUSTOMER_SEGMENTS))
+            segment_rules = CUSTOMER_SEGMENTS[segment]
+            user_id = f"user_{user_number}"
 
-def generate_normal_transaction(
-    fake: Faker,
-    rng: random.Random,
-    profile: UserProfile,
-) -> dict:
-    """Generate one normal customer transaction."""
-    categories = list(CATEGORY_RULES)
-    category = rng.choices(
-        categories,
-        weights=SEGMENT_CATEGORY_WEIGHTS[profile.segment],
-        k=1,
-    )[0]
-    category_rules = CATEGORY_RULES[category]
+            profiles[user_id] = UserProfile(
+                user_id=user_id,
+                segment=segment,
+                home_city=self.rng.choice(CITIES),
+                devices=[self.fake.uuid4()[:10] for _ in range(self.rng.randint(1, 3))],
+                avg_spend=segment_rules["avg_spend"],
+                gap_minutes=segment_rules["gap_minutes"],
+                last_tx_time=START_DATE + timedelta(days=self.rng.randint(0, 14)),
+            )
 
-    minutes_since_last_tx = rng.randint(5, profile.gap_minutes * 2)
-    timestamp = profile.last_tx_time + timedelta(minutes=minutes_since_last_tx)
-    profile.last_tx_time = timestamp
+        return profiles
 
-    amount = round(
-        rng.uniform(0.5, 1.8) * category_rules["typical_amount"],
-        2,
-    )
-    if category in {"tech", "travel"}:
-        amount = round(amount * rng.uniform(1.2, 2.4), 2)
+    def _generate_normal_transaction(self, profile: UserProfile) -> dict[str, object]:
+        categories = list(CATEGORY_RULES)
+        category = self.rng.choices(
+            categories,
+            weights=SEGMENT_CATEGORY_WEIGHTS[profile.segment],
+            k=1,
+        )[0]
+        category_rules = CATEGORY_RULES[category]
 
-    city = profile.home_city
-    if category == "travel":
-        city = rng.choice(CITIES)
+        minutes_since_last_tx = self.rng.randint(5, profile.gap_minutes * 2)
+        timestamp = profile.last_tx_time + timedelta(minutes=minutes_since_last_tx)
+        profile.last_tx_time = timestamp
 
-    channel = rng.choice(CHANNELS)
-    auth_method = rng.choice(AUTH_METHODS)
-    lat = round(city["lat"] + rng.uniform(-0.05, 0.05), 6)
-    lon = round(city["lon"] + rng.uniform(-0.05, 0.05), 6)
+        amount = round(self.rng.uniform(0.5, 1.8) * category_rules["typical_amount"], 2)
+        if category in {"tech", "travel"}:
+            amount = round(amount * self.rng.uniform(1.2, 2.4), 2)
 
-    return {
-        "tx_id": fake.uuid4()[:12],
-        "timestamp": timestamp,
-        "user_id": profile.user_id,
-        "amount": amount,
-        "category": category,
-        "merchant_name": category_rules["merchant"],
-        "merchant_city": city["name"],
-        "merchant_country": city["country"],
-        "channel": channel,
-        "device_id": rng.choice(profile.devices),
-        "auth_method": auth_method,
-        "lat": lat,
-        "lon": lon,
-        "ip_address": fake.ipv4(),
-        "customer_segment": profile.segment,
-        "transaction_status": "approved",
-        "fraud_pattern": "legitimate",
-        "is_fraud": 0,
-    }
+        city = profile.home_city
+        if category == "travel":
+            city = self.rng.choice(CITIES)
 
+        auth_method = self.rng.choice(AUTH_METHODS)
+        lat = round(city["lat"] + self.rng.uniform(-0.05, 0.05), 6)
+        lon = round(city["lon"] + self.rng.uniform(-0.05, 0.05), 6)
 
-def add_fraud_pattern(
-    transaction: dict,
-    profile: UserProfile,
-    fake: Faker,
-    rng: random.Random,
-) -> dict:
-    """Turn a small number of normal transactions into explainable fraud cases."""
-    if rng.random() >= FRAUD_RATE:
+        return {
+            "tx_id": self.fake.uuid4()[:12],
+            "timestamp": timestamp,
+            "user_id": profile.user_id,
+            "amount": amount,
+            "category": category,
+            "merchant_name": category_rules["merchant"],
+            "merchant_city": city["name"],
+            "merchant_country": city["country"],
+            "channel": self.rng.choice(CHANNELS),
+            "device_id": self.rng.choice(profile.devices),
+            "auth_method": auth_method,
+            "lat": lat,
+            "lon": lon,
+            "ip_address": self.fake.ipv4(),
+            "customer_segment": profile.segment,
+            "transaction_status": "approved",
+            "fraud_pattern": "legitimate",
+            "is_fraud": 0,
+        }
+
+    def _apply_fraud_pattern(
+        self, transaction: dict[str, object], profile: UserProfile
+    ) -> dict[str, object]:
+        if self.rng.random() >= self.fraud_rate:
+            return transaction
+
+        fraud_pattern = self.rng.choice(FRAUD_PATTERNS)
+        transaction["is_fraud"] = 1
+        transaction["fraud_pattern"] = fraud_pattern
+        transaction["auth_method"] = "Password"
+
+        if fraud_pattern == "high_amount":
+            transaction["category"] = "tech"
+            transaction["merchant_name"] = CATEGORY_RULES["tech"]["merchant"]
+            transaction["amount"] = round(self.rng.uniform(2_000, 4_500), 2)
+
+        elif fraud_pattern == "stolen_card":
+            foreign_city = self.rng.choice(
+                [city for city in CITIES if city != profile.home_city]
+            )
+            transaction["device_id"] = f"new_{self.fake.uuid4()[:10]}"
+            transaction["merchant_city"] = foreign_city["name"]
+            transaction["merchant_country"] = foreign_city["country"]
+            transaction["lat"] = foreign_city["lat"]
+            transaction["lon"] = foreign_city["lon"]
+            transaction["amount"] = round(self.rng.uniform(500, 4_500), 2)
+
+        elif fraud_pattern == "impossible_travel":
+            distant_city = self.rng.choice(
+                [city for city in CITIES if city != profile.home_city]
+            )
+            transaction["timestamp"] = profile.last_tx_time + timedelta(minutes=10)
+            transaction["merchant_city"] = distant_city["name"]
+            transaction["merchant_country"] = distant_city["country"]
+            transaction["lat"] = distant_city["lat"]
+            transaction["lon"] = distant_city["lon"]
+            transaction["amount"] = round(self.rng.uniform(300, 3_000), 2)
+
+        else:
+            transaction["category"] = "entertainment"
+            transaction["merchant_name"] = CATEGORY_RULES["entertainment"]["merchant"]
+            transaction["channel"] = "ecommerce"
+            transaction["device_id"] = f"new_{self.fake.uuid4()[:10]}"
+            transaction["amount"] = round(self.rng.uniform(1, 15), 2)
+            transaction["transaction_status"] = self.rng.choice(
+                ["approved", "declined"]
+            )
+
         return transaction
 
-    fraud_pattern = rng.choice(FRAUD_PATTERNS)
-    transaction["is_fraud"] = 1
-    transaction["fraud_pattern"] = fraud_pattern
-    transaction["auth_method"] = "Password"
+    def _output_path(self) -> Path:
+        directory = ensure_directory(self.output_dir)
+        return directory / f"simulated_transactions_seed_{self.seed}.csv"
 
-    if fraud_pattern == "high_amount":
-        transaction["category"] = "tech"
-        transaction["merchant_name"] = CATEGORY_RULES["tech"]["merchant"]
-        transaction["amount"] = round(rng.uniform(2_000, 4_500), 2)
+    def generate(self, n_tx: int = 10_000) -> pd.DataFrame:
+        rows: list[dict[str, object]] = []
 
-    elif fraud_pattern == "stolen_card":
-        foreign_city = rng.choice(
-            [city for city in CITIES if city != profile.home_city]
+        for _ in range(n_tx):
+            profile = self.profiles[self.rng.choice(list(self.profiles))]
+            transaction = self._generate_normal_transaction(profile)
+            transaction = self._apply_fraud_pattern(transaction, profile)
+            profile.last_tx_time = transaction["timestamp"]
+            rows.append(transaction)
+
+        return pd.DataFrame(rows)
+
+    def save(self, transactions: pd.DataFrame) -> Path:
+        output_path = self._output_path()
+        transactions.to_csv(output_path, index=False)
+        logger.info(
+            "Saved simulated transaction data to %s with %d rows",
+            output_path,
+            len(transactions),
         )
-        transaction["device_id"] = f"new_{fake.uuid4()[:10]}"
-        transaction["merchant_city"] = foreign_city["name"]
-        transaction["merchant_country"] = foreign_city["country"]
-        transaction["lat"] = foreign_city["lat"]
-        transaction["lon"] = foreign_city["lon"]
-        transaction["amount"] = round(rng.uniform(500, 4_500), 2)
+        return output_path
 
-    elif fraud_pattern == "impossible_travel":
-        distant_city = rng.choice(
-            [city for city in CITIES if city != profile.home_city]
-        )
-        transaction["timestamp"] = profile.last_tx_time + timedelta(minutes=10)
-        transaction["merchant_city"] = distant_city["name"]
-        transaction["merchant_country"] = distant_city["country"]
-        transaction["lat"] = distant_city["lat"]
-        transaction["lon"] = distant_city["lon"]
-        transaction["amount"] = round(rng.uniform(300, 3_000), 2)
-
-    else:
-        transaction["category"] = "entertainment"
-        transaction["merchant_name"] = CATEGORY_RULES["entertainment"]["merchant"]
-        transaction["channel"] = "ecommerce"
-        transaction["device_id"] = f"new_{fake.uuid4()[:10]}"
-        transaction["amount"] = round(rng.uniform(1, 15), 2)
-        transaction["transaction_status"] = rng.choice(["approved", "declined"])
-
-    return transaction
+    def generate_transactions_data(
+        self,
+        n_tx: int = 10_000,
+    ) -> pd.DataFrame:
+        transactions = self.generate(n_tx)
+        self.save(transactions)
+        return transactions
 
 
 def generate_transactions_data(
@@ -213,34 +245,9 @@ def generate_transactions_data(
     output_dir: str | Path | None = None,
 ) -> pd.DataFrame:
     """Generate synthetic transactions and save them under ``data/simulated``."""
-    fake = Faker()
-    fake.seed_instance(seed)
-    rng = random.Random(seed)
-
-    profiles = create_user_profiles(fake, rng, n_users)
-    user_ids = list(profiles)
-
-    rows = []
-    for _ in range(n_tx):
-        user_id = rng.choice(user_ids)
-        profile = profiles[user_id]
-        transaction = generate_normal_transaction(fake, rng, profile)
-        transaction = add_fraud_pattern(transaction, profile, fake, rng)
-        profile.last_tx_time = transaction["timestamp"]
-        rows.append(transaction)
-
-    df = pd.DataFrame(rows)
-
-    output_directory = ensure_directory(
-        SIMULATED_DATA_DIR if output_dir is None else Path(output_dir)
+    simulator = TransactionSimulator(
+        n_users=n_users,
+        seed=seed,
+        output_dir=output_dir,
     )
-    output_path = output_directory / f"simulated_transactions_seed_{seed}.csv"
-    df.to_csv(output_path, index=False)
-
-    print("=" * 70)
-    print(f"File path: {output_path.name}")
-    print(f"Number of rows    : {len(df)}")
-    print(f"Fraud rate        : {df.is_fraud.mean():.2%}")
-    print("=" * 70)
-
-    return df
+    return simulator.generate_transactions_data(n_tx=n_tx)
