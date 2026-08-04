@@ -1,4 +1,13 @@
-"""Synthetic bank/card transaction data generation."""
+"""Synthetic bank/card transaction data generation.
+
+This version is deliberately harder to model than a naive fraud simulator.
+A naive simulator gives fraud a clean, disjoint feature range (e.g. fraud
+amount always > 2,000; legitimate always < 800), so a model just learns a
+threshold and looks unrealistically good. Real fraud detection is hard
+because the fraud and legitimate distributions *overlap* -- most fraud
+tries to look normal, and some normal behavior looks anomalous. Search for
+"OVERLAP:" comments below for the specific places this is engineered in.
+"""
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -16,6 +25,9 @@ logger = logging.getLogger(__name__)
 
 START_DATE = datetime(2026, 1, 1, 8, 0)
 DEFAULT_FRAUD_RATE = 0.015
+DEFAULT_SIGNAL_NOISE_RATE = 0.15  # see _apply_signal() docstring
+DEFAULT_LEGIT_ANOMALY_RATE = 0.04  # see _maybe_inject_legit_anomaly() docstring
+DEFAULT_STEALTHY_FRAUD_SHARE = 0.30  # see _apply_fraud_pattern() docstring
 
 CITIES = [
     {"name": "New York", "country": "US", "lat": 40.7128, "lon": -74.0060},
@@ -50,7 +62,17 @@ SEGMENT_CATEGORY_WEIGHTS = {
 }
 
 CHANNELS = ["pos", "ecommerce", "mobile_wallet"]
-FRAUD_PATTERNS = ["high_amount", "stolen_card", "impossible_travel", "card_testing"]
+
+# "account_takeover" is new: it deliberately mimics normal spending instead
+# of forcing an unusual category/amount, so it can't be caught by amount
+# thresholds alone -- see _apply_fraud_pattern().
+FRAUD_PATTERNS = [
+    "high_amount",
+    "stolen_card",
+    "impossible_travel",
+    "card_testing",
+    "account_takeover",
+]
 
 
 @dataclass
@@ -74,11 +96,17 @@ class TransactionSimulator:
         n_users: int = 500,
         seed: int = 42,
         fraud_rate: float = DEFAULT_FRAUD_RATE,
+        signal_noise_rate: float = DEFAULT_SIGNAL_NOISE_RATE,
+        legit_anomaly_rate: float = DEFAULT_LEGIT_ANOMALY_RATE,
+        stealthy_fraud_share: float = DEFAULT_STEALTHY_FRAUD_SHARE,
         output_dir: Path | str | None = None,
     ) -> None:
         self.n_users = n_users
         self.seed = seed
         self.fraud_rate = fraud_rate
+        self.signal_noise_rate = signal_noise_rate
+        self.legit_anomaly_rate = legit_anomaly_rate
+        self.stealthy_fraud_share = stealthy_fraud_share
         self.output_dir = (
             Path(output_dir) if output_dir is not None else SIMULATED_DATA_DIR
         )
@@ -129,10 +157,9 @@ class TransactionSimulator:
             city = self.rng.choice(CITIES)
 
         auth_method = self.rng.choice(AUTH_METHODS)
-        lat = round(city["lat"] + self.rng.uniform(-0.05, 0.05), 6)
-        lon = round(city["lon"] + self.rng.uniform(-0.05, 0.05), 6)
+        device_id = self.rng.choice(profile.devices)
 
-        return {
+        transaction = {
             "tx_id": self.fake.uuid4()[:12],
             "timestamp": timestamp,
             "user_id": profile.user_id,
@@ -142,10 +169,10 @@ class TransactionSimulator:
             "merchant_city": city["name"],
             "merchant_country": city["country"],
             "channel": self.rng.choice(CHANNELS),
-            "device_id": self.rng.choice(profile.devices),
+            "device_id": device_id,
             "auth_method": auth_method,
-            "lat": lat,
-            "lon": lon,
+            "lat": round(city["lat"] + self.rng.uniform(-0.05, 0.05), 6),
+            "lon": round(city["lon"] + self.rng.uniform(-0.05, 0.05), 6),
             "ip_address": self.fake.ipv4(),
             "customer_segment": profile.segment,
             "transaction_status": "approved",
@@ -153,52 +180,160 @@ class TransactionSimulator:
             "is_fraud": 0,
         }
 
+        self._maybe_inject_legit_anomaly(transaction, profile)
+        return transaction
+
+    def _maybe_inject_legit_anomaly(
+        self, transaction: dict[str, object], profile: UserProfile
+    ) -> None:
+        """OVERLAP: give some legitimate transactions fraud-shaped tells.
+
+        A model trained on data where "new device" or "big purchase" only
+        ever appears on fraud rows will learn those as free discriminators.
+        Real customers upgrade phones, travel for work, and occasionally
+        make a large one-off purchase -- all without being defrauded. This
+        injects those legitimate-but-anomalous cases at `legit_anomaly_rate`
+        so the model has to rely on combinations of features rather than
+        any single "anomaly implies fraud" shortcut.
+        """
+        if self.rng.random() >= self.legit_anomaly_rate:
+            return
+
+        anomaly = self.rng.choice(["new_device", "away_from_home", "large_purchase"])
+
+        if anomaly == "new_device":
+            new_device = f"new_{self.fake.uuid4()[:10]}"
+            profile.devices.append(new_device)
+            transaction["device_id"] = new_device
+
+        elif anomaly == "away_from_home":
+            other_city = self.rng.choice(
+                [city for city in CITIES if city != profile.home_city]
+            )
+            transaction["merchant_city"] = other_city["name"]
+            transaction["merchant_country"] = other_city["country"]
+            transaction["lat"] = round(
+                other_city["lat"] + self.rng.uniform(-0.05, 0.05), 6
+            )
+            transaction["lon"] = round(
+                other_city["lon"] + self.rng.uniform(-0.05, 0.05), 6
+            )
+
+        else:  # large_purchase
+            transaction["amount"] = round(profile.avg_spend * self.rng.uniform(4, 9), 2)
+
+    def _apply_signal(self) -> bool:
+        """
+        Decide whether to apply a fraud-indicative feature override.
+
+        Without this, every fraud row got the exact same tells (forced
+        auth_method, forced "new_" device prefix), which makes fraud
+        trivially separable on a single feature instead of something a
+        model actually has to learn. With probability `signal_noise_rate`,
+        the override is skipped, so the tell is a strong signal but not a
+        perfect one -- closer to how real fraud labels behave.
+        """
+        return self.rng.random() >= self.signal_noise_rate
+
     def _apply_fraud_pattern(
         self, transaction: dict[str, object], profile: UserProfile
     ) -> dict[str, object]:
+
         if self.rng.random() >= self.fraud_rate:
             return transaction
 
         fraud_pattern = self.rng.choice(FRAUD_PATTERNS)
         transaction["is_fraud"] = 1
         transaction["fraud_pattern"] = fraud_pattern
-        transaction["auth_method"] = "Password"
+
+        # OVERLAP: a share of fraud is "stealthy" -- it keeps the amount
+        # inside the customer's own normal spending range instead of
+        # jumping to an obviously-fraud-sized number. Real carders often
+        # deliberately keep purchases small/typical to avoid triggering
+        # amount-based rules, so amount alone should not be a reliable
+        # separator.
+        is_stealthy = self.rng.random() < self.stealthy_fraud_share
+
+        if self._apply_signal():
+            transaction["auth_method"] = "Password"
 
         if fraud_pattern == "high_amount":
             transaction["category"] = "tech"
             transaction["merchant_name"] = CATEGORY_RULES["tech"]["merchant"]
-            transaction["amount"] = round(self.rng.uniform(2_000, 4_500), 2)
+            if is_stealthy:
+                transaction["amount"] = round(
+                    CATEGORY_RULES["tech"]["typical_amount"]
+                    * self.rng.uniform(0.8, 2.0),
+                    2,
+                )
+            else:
+                transaction["amount"] = round(self.rng.uniform(2_000, 4_500), 2)
 
         elif fraud_pattern == "stolen_card":
             foreign_city = self.rng.choice(
                 [city for city in CITIES if city != profile.home_city]
             )
-            transaction["device_id"] = f"new_{self.fake.uuid4()[:10]}"
+            if self._apply_signal():
+                transaction["device_id"] = f"new_{self.fake.uuid4()[:10]}"
             transaction["merchant_city"] = foreign_city["name"]
             transaction["merchant_country"] = foreign_city["country"]
             transaction["lat"] = foreign_city["lat"]
             transaction["lon"] = foreign_city["lon"]
-            transaction["amount"] = round(self.rng.uniform(500, 4_500), 2)
+            transaction["amount"] = round(
+                profile.avg_spend * self.rng.uniform(1.0, 3.0)
+                if is_stealthy
+                else self.rng.uniform(500, 4_500),
+                2,
+            )
 
         elif fraud_pattern == "impossible_travel":
             distant_city = self.rng.choice(
                 [city for city in CITIES if city != profile.home_city]
             )
-            transaction["timestamp"] = profile.last_tx_time + timedelta(minutes=10)
+            # OVERLAP: a fixed 10-minute gap makes "impossible travel" a
+            # trivial time-delta rule. Real geo-velocity fraud sometimes
+            # leaves a gap wide enough to *look* physically plausible
+            # (a few hours), so catching it requires reasoning about
+            # distance vs. elapsed time rather than a single threshold.
+            gap_minutes = (
+                self.rng.randint(6, 45)
+                if not is_stealthy
+                else self.rng.randint(120, 360)
+            )
+            transaction["timestamp"] = profile.last_tx_time + timedelta(
+                minutes=gap_minutes
+            )
             transaction["merchant_city"] = distant_city["name"]
             transaction["merchant_country"] = distant_city["country"]
             transaction["lat"] = distant_city["lat"]
             transaction["lon"] = distant_city["lon"]
             transaction["amount"] = round(self.rng.uniform(300, 3_000), 2)
 
-        else:
+        elif fraud_pattern == "card_testing":
             transaction["category"] = "entertainment"
             transaction["merchant_name"] = CATEGORY_RULES["entertainment"]["merchant"]
             transaction["channel"] = "ecommerce"
-            transaction["device_id"] = f"new_{self.fake.uuid4()[:10]}"
+            if self._apply_signal():
+                transaction["device_id"] = f"new_{self.fake.uuid4()[:10]}"
             transaction["amount"] = round(self.rng.uniform(1, 15), 2)
             transaction["transaction_status"] = self.rng.choice(
                 ["approved", "declined"]
+            )
+
+        else:  # account_takeover
+            # OVERLAP: deliberately does NOT override category, amount,
+            # city, or channel. This is a fraudster operating a
+            # compromised account carefully -- the only differences from
+            # genuine behavior are a device change (itself noised by
+            # _apply_signal) and a shortened gap since the last
+            # transaction, both weak signals rather than hard rules.
+            if self._apply_signal():
+                transaction["device_id"] = f"new_{self.fake.uuid4()[:10]}"
+            shortened_gap = max(
+                5, int(profile.gap_minutes * self.rng.uniform(0.1, 0.4))
+            )
+            transaction["timestamp"] = profile.last_tx_time + timedelta(
+                minutes=shortened_gap
             )
 
         return transaction
