@@ -1,5 +1,8 @@
-"""Cost-sensitive threshold optimization."""
+"""
+Cost-sensitive threshold optimization.
+"""
 
+from pathlib import Path
 import logging
 import numpy as np
 import pandas as pd
@@ -22,6 +25,7 @@ def business_cost(
     cost_fp: float,
     cost_fn: float,
 ) -> float:
+    """Calculate the business cost of a binary fraud decision rule."""
     _, false_positives, false_negatives, _ = confusion_matrix(
         y_true,
         y_pred,
@@ -32,7 +36,8 @@ def business_cost(
 
 class ThresholdOptimizer:
     """
-    Search for a decision threshold that minimizes business cost."""
+    Search for a decision threshold that minimizes business cost.
+    """
 
     def __init__(
         self,
@@ -76,6 +81,7 @@ class ThresholdOptimizer:
         cost_fn: float = 10.0,
         save: bool = True,
     ) -> tuple[np.ndarray, np.ndarray]:
+        """Search for the decision threshold that minimizes business cost on test data."""
         model_path = self.model_dir / model_name
         model = load_model(model_path)
         X_test_aligned = align_features_to_model(

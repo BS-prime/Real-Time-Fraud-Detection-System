@@ -32,7 +32,9 @@ NON_MODEL_COLUMNS = [
 
 
 class FeatureEngineer:
-    """Convert raw transactions into model-ready features."""
+    """
+    Convert raw transactions into model-ready features.
+    """
 
     def __init__(
         self,
@@ -47,12 +49,14 @@ class FeatureEngineer:
         self.feature_dir = feature_dir
 
     def load_transactions(self, csv_name: str) -> pd.DataFrame:
+        """Load raw simulated transactions from disk."""
         csv_path = self.simulated_dir / csv_name
         if not csv_path.exists():
             raise FileNotFoundError(f"Transaction file not found: {csv_path}")
         return pd.read_csv(csv_path)
 
     def engineer_transaction_features(self, transactions: pd.DataFrame) -> pd.DataFrame:
+        """Transform raw transactions into model-ready feature columns."""
         df = transactions.copy()
         df["timestamp"] = pd.to_datetime(df["timestamp"])
         df = df.sort_values(["user_id", "timestamp"]).reset_index(drop=True)
@@ -62,10 +66,12 @@ class FeatureEngineer:
         df["tx_count_24h"] = (
             df.groupby("user_id").rolling("24h", on="timestamp")["tx_id"].count().values
         )
+        # tx_count_24h counts transactions per user inside a 24-hour window.
 
         df["avg_spend_user"] = df.groupby("user_id")["amount"].transform(
             lambda spend: spend.shift(1).expanding().mean()
         )
+        # amount_ratio compares current transaction amount to the customer's historical average.
         df["amount_ratio"] = np.where(
             df["avg_spend_user"] > 0,
             df["amount"] / df["avg_spend_user"],
@@ -82,6 +88,7 @@ class FeatureEngineer:
             df["prev_lat"],
             df["prev_lon"],
         ).fillna(0)
+        # Fill missing distance values for first transactions where there is no previous location.
 
         hours_since_previous = (
             (df["timestamp"] - df["prev_ts"])
@@ -99,6 +106,7 @@ class FeatureEngineer:
             drop_first=True,
             dtype=int,
         )
+        # Convert categorical features into the binary columns expected by the model.
 
         df = df.drop(columns=NON_MODEL_COLUMNS)
 

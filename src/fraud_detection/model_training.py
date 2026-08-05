@@ -46,6 +46,7 @@ class ModelTrainer:
         self.config = self._load_config()
 
     def _load_config(self) -> dict[str, Any]:
+        """Read the model training settings from YAML configuration."""
         if not self.config_path.exists():
             raise FileNotFoundError(
                 f"Training configuration not found: {self.config_path}"
@@ -55,6 +56,10 @@ class ModelTrainer:
             return yaml.safe_load(file)
 
     def _load_training_data(self, csv_name: str) -> pd.DataFrame:
+        """
+        Load engineered feature data for model training.
+        """
+
         csv_path = self.feature_dir / csv_name
         if not csv_path.exists():
             raise FileNotFoundError(f"Feature file not found: {csv_path}")
@@ -63,9 +68,17 @@ class ModelTrainer:
     def _split_features_and_target(
         self, df: pd.DataFrame
     ) -> tuple[pd.DataFrame, pd.Series]:
+        """
+        Separate feature columns from the target label column.
+        """
+
         return df.drop(columns=[TARGET_COLUMN]), df[TARGET_COLUMN]
 
     def _build_estimator(self, model_type: str, seed: int) -> Any:
+        """
+        Construct a classifier instance based on the configured model type.
+        """
+
         if model_type not in MODEL_TYPES:
             supported = ", ".join(MODEL_TYPES)
             raise ValueError(
@@ -75,6 +88,10 @@ class ModelTrainer:
 
     @staticmethod
     def _save_trained_model(model: Any, model_type: str, model_path: Path) -> None:
+        """
+        Persist the selected model using the correct serializer.
+        """
+        
         if model_type == "XGBClassifier":
             model.save_model(str(model_path))
         else:
@@ -83,6 +100,7 @@ class ModelTrainer:
     def train(
         self, csv_name: str = "fraud_features_seed_42.csv", algo_name: str = "xgboost"
     ) -> tuple[pd.DataFrame, pd.Series]:
+        
         seed = seed_from_filename(csv_name)
         df = self._load_training_data(csv_name)
         features, target = self._split_features_and_target(df)
@@ -125,6 +143,7 @@ class ModelTrainer:
             output_dir,
         )
 
+        # Return only the held-out test data so the caller can evaluate model performance.
         return X_test, y_test
 
 

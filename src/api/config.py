@@ -45,3 +45,8 @@ class ApiSettings:
     user_history: Mapping[str, UserHistory] = field(
         default_factory=lambda: DEFAULT_USER_HISTORY
     )
+
+    def __post_init__(self) -> None:
+        """Validate or normalize runtime settings after initialization."""
+        if self.default_time_delta_min <= 0:
+            raise ValueError("default_time_delta_min must be positive")

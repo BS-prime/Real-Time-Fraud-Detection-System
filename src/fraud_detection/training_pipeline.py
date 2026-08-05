@@ -29,32 +29,40 @@ class TrainingPipeline:
 
     def run(
         self,
-        n_tx: int = 10_000,
-        n_users: int = 500,
+        n_tx: int = 1_000_000,
+        n_users: int = 5_000,
         seed: int = 42,
         algo_name: str = "xgboost",
     ) -> dict[str, object]:
+
+        # 0. logging the pipeline start
         logger.info("FRAUD DETECTION TRAINING PIPELINE STARTED")
         start_time = datetime.now()
 
+        # 1. generate transactions data
         logger.info("[1/5] %s", self.steps[0])
         generate_transactions_data(n_tx=n_tx, n_users=n_users, seed=seed)
         simulated_file = f"simulated_transactions_seed_{seed}.csv"
 
+        # 2. perform feature engineering
         logger.info("[2/5] %s", self.steps[1])
         feature_engineer(simulated_file)
         features_file = f"fraud_features_seed_{seed}.csv"
 
+        # 3. model training
         logger.info("[3/5] %s", self.steps[2])
         X_test, y_test = model_trainer(csv_name=features_file, algo_name=algo_name)
         model_name = f"{algo_name}_seed_{seed}.json"
 
+        # 4. business cost-aware thresholding
         logger.info("[4/5] %s", self.steps[3])
         y_prob, y_pred = threshold_optimizer(X_test, y_test, model_name=model_name)
 
+        # 5. model evaluation
         logger.info("[5/5] %s", self.steps[4])
         model_evaluator(model_name, X_test, y_test, y_prob, y_pred)
 
+        # 6. logging the ending of pipeline
         end_time = datetime.now()
         duration = (end_time - start_time).total_seconds()
 
@@ -75,6 +83,9 @@ def run_training_pipeline(
     seed: int = 42,
     algo_name: str = "xgboost",
 ) -> dict[str, object]:
+    """
+    executing the training pipeline
+    """
 
     return TrainingPipeline().run(
         n_tx=n_tx,
@@ -82,3 +93,7 @@ def run_training_pipeline(
         seed=seed,
         algo_name=algo_name,
     )
+
+
+if __name__ == "__main__":
+    run_training_pipeline(n_tx=1_000_000, n_users=5_000, seed=42, algo_name="xgboost")

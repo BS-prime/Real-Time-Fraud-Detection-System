@@ -19,8 +19,10 @@ CONFIG_PATH = PROJECT_ROOT / "configs" / "config.yaml"
 
 
 def ensure_directory(path: Path) -> Path:
-    """
-    Create a directory when needed and return it for convenient reuse.
+    """Create a directory if it does not already exist.
+
+    This helper is used throughout the project to ensure artifact and data
+    directories are available before writing files.
     """
 
     path.mkdir(parents=True, exist_ok=True)
@@ -28,16 +30,12 @@ def ensure_directory(path: Path) -> Path:
 
 
 def simulated_transactions_path(seed: int | str) -> Path:
-    """
-    Return the standard raw transaction CSV path for a seed.
-    """
+    """Return the standard raw transaction CSV path for a seed."""
 
     return SIMULATED_DATA_DIR / f"simulated_transactions_seed_{seed}.csv"
 
 
 def feature_file_path(seed: int | str) -> Path:
-    """
-    Return the standard engineered feature CSV path for a seed.
-    """
+    """Return the standard engineered feature CSV path for a seed."""
 
     return FEATURE_DATA_DIR / f"fraud_features_seed_{seed}.csv"

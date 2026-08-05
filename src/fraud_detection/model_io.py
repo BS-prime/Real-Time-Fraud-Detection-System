@@ -20,6 +20,7 @@ class ModelIO:
 
     @staticmethod
     def load_model(model_path: str | Path) -> Any:
+        """Load a saved model from disk, supporting joblib and XGBoost formats."""
         model_path = Path(model_path)
         if not model_path.exists():
             raise FileNotFoundError(f"Model file not found: {model_path}")
@@ -43,6 +44,7 @@ class ModelIO:
     def predict_fraud_probability(
         model: Any, features: pd.DataFrame | np.ndarray
     ) -> np.ndarray:
+        """Return fraud probability estimates for the positive class."""
         if hasattr(model, "predict_proba"):
             return np.asarray(model.predict_proba(features)[:, 1], dtype=float)
 
@@ -76,6 +78,7 @@ class ModelIO:
         model: Any,
         fallback_columns: list[str] | None = None,
     ) -> pd.DataFrame:
+        """Ensure the feature matrix matches the model's expected input schema."""
         expected_columns = (
             cls.model_feature_names(model) or fallback_columns or FEATURE_COLUMNS
         )

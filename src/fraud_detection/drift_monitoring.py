@@ -50,6 +50,7 @@ class DriftMonitor:
         self.reports_dir = reports_dir
 
     def load_model_ready_dataset(self, dataset_name: str) -> pd.DataFrame:
+        """Load a dataset that is already feature-engineered or derive features as needed."""
         feature_path = self.feature_dir / dataset_name
         if feature_path.exists():
             return pd.read_csv(feature_path)
@@ -69,10 +70,12 @@ class DriftMonitor:
 
     @staticmethod
     def split_dataset(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.Series]:
+        """Split a dataset into features and the fraud target label."""
         return df.drop(columns=[TARGET_COLUMN]), df[TARGET_COLUMN]
 
     @staticmethod
     def drift_status(drift_score: float, fail_threshold: float) -> str:
+        """Convert a normalized drift score into an actionable status string."""
         if drift_score >= fail_threshold:
             return "CRITICAL: retraining recommended"
         if drift_score >= fail_threshold * 0.6:
@@ -81,6 +84,7 @@ class DriftMonitor:
 
     @staticmethod
     def _drift_score(report: Report) -> float:
+        """Compute a simple drift score from the Evidently report output."""
         report_dict = report.as_dict()
         drift_flags = [
             metric["result"]["drift_detected"]

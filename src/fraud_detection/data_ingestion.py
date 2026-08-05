@@ -88,6 +88,7 @@ class TransactionSimulator:
         self.profiles = self._create_user_profiles()
 
     def _create_user_profiles(self) -> dict[str, UserProfile]:
+        """Build a synthetic user population with spending habits and home locations."""
         profiles: dict[str, UserProfile] = {}
 
         for user_number in range(self.n_users):
@@ -108,6 +109,7 @@ class TransactionSimulator:
         return profiles
 
     def _generate_normal_transaction(self, profile: UserProfile) -> dict[str, object]:
+        """Generate a valid transaction for a user profile before fraud injection."""
         categories = list(CATEGORY_RULES)
         category = self.rng.choices(
             categories,
@@ -156,6 +158,7 @@ class TransactionSimulator:
     def _apply_fraud_pattern(
         self, transaction: dict[str, object], profile: UserProfile
     ) -> dict[str, object]:
+        """Inject a fraud pattern into the transaction based on the configured fraud rate."""
         if self.rng.random() >= self.fraud_rate:
             return transaction
 
