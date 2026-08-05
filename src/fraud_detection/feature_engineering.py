@@ -41,7 +41,7 @@ from fraud_detection.feature_schema import (
 )
 from fraud_detection.geo import haversine_km
 from fraud_detection.naming import seed_from_filename
-from fraud_detection.paths import FEATURE_DATA_DIR, SIMULATED_DATA_DIR, ensure_directory
+from fraud_detection.paths import FEATURE_DATA_DIR, SIMULATED_DATA_DIR, create_dir
 
 logger = logging.getLogger(__name__)
 
@@ -192,7 +192,7 @@ class FeatureEngineer:
         # Fill missing distance values for first transactions where there is no previous location.
 
         hours_since_previous = (
-            (df["timestamp"] - df["prev_ts"]) 
+            (df["timestamp"] - df["prev_ts"])
             .dt.total_seconds()
             .div(3600)
             .clip(lower=1e-3)
@@ -220,7 +220,6 @@ class FeatureEngineer:
 
         return df[self.feature_columns + [self.target_column]]
 
-
     def save_features(self, features: pd.DataFrame, seed: int) -> Path:
         """
         Persist engineered features to disk atomically.
@@ -229,7 +228,7 @@ class FeatureEngineer:
         place, so a process crash or concurrent read never observes a
         partially written feature file.
         """
-        output_dir = ensure_directory(self.feature_dir)
+        output_dir = create_dir(self.feature_dir)
         output_path = output_dir / f"fraud_features_seed_{seed}.csv"
 
         fd, tmp_name = tempfile.mkstemp(
@@ -372,7 +371,7 @@ class FeatureEngineer:
         df["travel_velocity_kmph"] = (
             df["dist_from_last_tx_km"] / hours_since_previous
         ).fillna(0.0)
-        
+
         return df
 
     def _encode_categoricals(self, df: pd.DataFrame) -> pd.DataFrame:

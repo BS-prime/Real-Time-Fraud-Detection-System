@@ -18,7 +18,7 @@ REPORTS_DIR = PROJECT_ROOT / "reports"
 CONFIG_PATH = PROJECT_ROOT / "configs" / "config.yaml"
 
 
-def ensure_directory(path: Path) -> Path:
+def create_dir(path: Path) -> Path:
     """Create a directory if it does not already exist.
 
     This helper is used throughout the project to ensure artifact and data

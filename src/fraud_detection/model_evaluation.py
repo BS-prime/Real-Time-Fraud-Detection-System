@@ -14,7 +14,7 @@ from sklearn.metrics import (
 )
 
 from fraud_detection.model_io import align_features_to_model, load_model
-from fraud_detection.paths import MODEL_DIR, REPORTS_DIR, ensure_directory
+from fraud_detection.paths import MODEL_DIR, REPORTS_DIR, create_dir
 
 logger = logging.getLogger(__name__)
 
@@ -75,6 +75,10 @@ class ModelEvaluator:
         y_prob: np.ndarray | pd.Series,
         y_pred_final: np.ndarray | pd.Series,
     ) -> dict[str, float | str]:
+        """
+        Evaluate a trained model and generate evaluation plots and metrics.
+        """
+
         model_path = self.model_dir / model_name
         model = load_model(model_path)
         X_test_aligned = align_features_to_model(
@@ -82,8 +86,8 @@ class ModelEvaluator:
         )
 
         model_stem = Path(model_name).stem
-        evaluation_dir = ensure_directory(self.reports_dir / "model_evaluation")
-        shap_dir = ensure_directory(self.reports_dir / "shap")
+        evaluation_dir = create_dir(self.reports_dir / "model_evaluation")
+        shap_dir = create_dir(self.reports_dir / "shap")
 
         pr_curve_path = evaluation_dir / f"precision_recall_curve_{model_stem}.png"
         shap_path = shap_dir / f"shap_summary_{model_stem}.png"
@@ -115,4 +119,7 @@ def model_evaluator(
     y_prob: np.ndarray | pd.Series,
     y_pred_final: np.ndarray | pd.Series,
 ) -> dict[str, float | str]:
+    """
+    Evaluate a trained model and generate evaluation plots and metrics.
+    """
     return ModelEvaluator().evaluate(model_name, X_test, y_test, y_prob, y_pred_final)

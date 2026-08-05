@@ -19,7 +19,7 @@ import pandas as pd
 from faker import Faker
 
 from fraud_detection.feature_schema import AUTH_METHODS
-from fraud_detection.paths import SIMULATED_DATA_DIR, ensure_directory
+from fraud_detection.paths import SIMULATED_DATA_DIR, create_dir
 
 logger = logging.getLogger(__name__)
 
@@ -342,7 +342,7 @@ class TransactionSimulator:
         return transaction
 
     def _output_path(self) -> Path:
-        directory = ensure_directory(self.output_dir)
+        directory = create_dir(self.output_dir)
         return directory / f"simulated_transactions_seed_{self.seed}.csv"
 
     def generate(self, n_tx: int = 10_000) -> pd.DataFrame:

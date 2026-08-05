@@ -28,7 +28,7 @@ from fraud_detection.paths import (
     MODEL_DIR,
     REPORTS_DIR,
     SIMULATED_DATA_DIR,
-    ensure_directory,
+    create_dir,
 )
 
 logger = logging.getLogger(__name__)
@@ -155,7 +155,7 @@ class DriftMonitor:
             ),
         )
 
-        reports_dir = ensure_directory(self.reports_dir / "drift_monitoring")
+        reports_dir = create_dir(self.reports_dir / "drift_monitoring")
         ref_version = Path(trained_dataset).stem
         current_version = Path(new_dataset).stem
         timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")

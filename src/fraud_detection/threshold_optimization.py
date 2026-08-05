@@ -15,7 +15,7 @@ from fraud_detection.model_io import (
     predict_fraud_probability,
     save_json,
 )
-from fraud_detection.paths import MODEL_DIR, THRESHOLD_DIR, ensure_directory
+from fraud_detection.paths import MODEL_DIR, THRESHOLD_DIR, create_dir
 
 logger = logging.getLogger(__name__)
 
@@ -97,7 +97,7 @@ class ThresholdOptimizer:
             cost_fn=cost_fn,
         )
 
-        output_dir = ensure_directory(self.threshold_dir)
+        output_dir = create_dir(self.threshold_dir)
         output_path = output_dir / f"optimal_threshold_{model_path.stem}.json"
         if save:
             save_json(threshold_info, output_path)

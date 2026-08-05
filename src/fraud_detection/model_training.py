@@ -18,7 +18,7 @@ from fraud_detection.paths import (
     CONFIG_PATH,
     FEATURE_DATA_DIR,
     MODEL_DIR,
-    ensure_directory,
+    create_dir,
 )
 
 logger = logging.getLogger(__name__)
@@ -46,7 +46,10 @@ class ModelTrainer:
         self.config = self._load_config()
 
     def _load_config(self) -> dict[str, Any]:
-        """Read the model training settings from YAML configuration."""
+        """
+        Read the model training settings from YAML configuration.
+        """
+
         if not self.config_path.exists():
             raise FileNotFoundError(
                 f"Training configuration not found: {self.config_path}"
@@ -91,7 +94,7 @@ class ModelTrainer:
         """
         Persist the selected model using the correct serializer.
         """
-        
+
         if model_type == "XGBClassifier":
             model.save_model(str(model_path))
         else:
@@ -100,21 +103,30 @@ class ModelTrainer:
     def train(
         self, csv_name: str = "fraud_features_seed_42.csv", algo_name: str = "xgboost"
     ) -> tuple[pd.DataFrame, pd.Series]:
-        
+        """
+        Train the model and save it.
+        """
+
+        # 1. Load the feature data and split into features and target.
         seed = seed_from_filename(csv_name)
         df = self._load_training_data(csv_name)
         features, target = self._split_features_and_target(df)
 
+        # 2. Validate the requested algorithm is supported
         if algo_name not in self.config["models"]:
             available = ", ".join(self.config["models"])
             raise ValueError(
                 f"Unknown algo_name '{algo_name}'. Available models: {available}"
             )
 
-        settings = self.config["models"][algo_name]
-        model_type = settings["type"]
-        estimator = self._build_estimator(model_type, seed)
+        # 3. Build the estimator with the specified random seed.
+        settings = self.config["models"][algo_name]  # {"type": "XGBClassifier", "params": {...}}
+        model_type = settings["type"]  # "XGBClassifier" or "RandomForestClassifier"
+        estimator = self._build_estimator(
+            model_type, seed
+        )  # RandomForestClassifier(random_state=seed) or XGBClassifier(random_state=seed)
 
+        # 4. Split the data into training and testing sets, stratifying by the target label.
         X_train, X_test, y_train, y_test = train_test_split(
             features,
             target,
@@ -123,16 +135,15 @@ class ModelTrainer:
             random_state=seed,
         )
 
+        # 5. Perform a grid search over the hyperparameter space defined in the configuration.
         logger.info("Running GridSearch for %s", algo_name)
         grid_search = GridSearchCV(
-            estimator,
-            settings["params"],
-            cv=4,
-            scoring="average_precision",
+            estimator, settings["params"], scoring="average_precision", n_jobs=-1
         )
         grid_search.fit(X_train, y_train)
 
-        output_dir = ensure_directory(self.model_dir)
+        # 6. Save the best model to the artifacts directory.
+        output_dir = create_dir(self.model_dir)
         model_path = output_dir / f"{algo_name}_seed_{seed}.json"
         self._save_trained_model(grid_search.best_estimator_, model_type, model_path)
 
