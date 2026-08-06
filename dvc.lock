@@ -1,0 +1,59 @@
+schema: '2.0'
+stages:
+  data_ingestion:
+    cmd: uv run src/fraud_detection/data_ingestion.py
+    deps:
+    - path: src/fraud_detection/data_ingestion.py
+      hash: md5
+      md5: 2a4e5f2fd8e238177b073948be1cfb21
+      size: 20961
+    - path: src/fraud_detection/feature_schema.py
+      hash: md5
+      md5: e468e4c9cb92ffa6c9d2126614d3173c
+      size: 618
+    - path: src/fraud_detection/paths.py
+      hash: md5
+      md5: ee61b93bb30def186c6af411c80e3c07
+      size: 1204
+    params:
+      configs/params.yaml:
+        data_ingestion.n_tx: 1000000
+        data_ingestion.n_users: 5000
+        data_ingestion.seed: 42
+    outs:
+    - path: data/simulated/simulated_transactions_seed_42.csv
+      hash: md5
+      md5: c692d9e001169a279d91664098b8e497
+      size: 174020358
+  feature_engineering:
+    cmd: uv run src/fraud_detection/feature_engineering.py
+    deps:
+    - path: data/simulated/simulated_transactions_seed_42.csv
+      hash: md5
+      md5: c692d9e001169a279d91664098b8e497
+      size: 174020358
+    - path: src/fraud_detection/feature_engineering.py
+      hash: md5
+      md5: 9eda138e2b6b3d4fb2856fc115cc9eaf
+      size: 14318
+    - path: src/fraud_detection/feature_schema.py
+      hash: md5
+      md5: e468e4c9cb92ffa6c9d2126614d3173c
+      size: 618
+    - path: src/fraud_detection/geo.py
+      hash: md5
+      md5: d8678cb296e673cf070d9247aa1f0799
+      size: 527
+    - path: src/fraud_detection/naming.py
+      hash: md5
+      md5: e6bb256f0b575c8b4470c6ec9ea80a7e
+      size: 548
+    - path: src/fraud_detection/paths.py
+      hash: md5
+      md5: ee61b93bb30def186c6af411c80e3c07
+      size: 1204
+    outs:
+    - path: data/features/fraud_features_seed_42.csv
+      hash: md5
+      md5: b347b38520bdd185225e725d2b7ed563
+      size: 125842868

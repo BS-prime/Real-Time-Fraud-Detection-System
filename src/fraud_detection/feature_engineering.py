@@ -156,70 +156,6 @@ class FeatureEngineer:
 
         return df
 
-    def engineer_transaction_features(self, transactions: pd.DataFrame) -> pd.DataFrame:
-        """Transform raw transactions into model-ready feature columns."""
-        df = transactions.copy()
-        df["timestamp"] = pd.to_datetime(df["timestamp"])
-        df = df.sort_values(["user_id", "timestamp"]).reset_index(drop=True)
-
-        df["hour"] = df["timestamp"].dt.hour
-        df["day_of_week"] = df["timestamp"].dt.dayofweek
-        df["tx_count_24h"] = (
-            df.groupby("user_id").rolling("24h", on="timestamp")["tx_id"].count().values
-        )
-        # tx_count_24h counts transactions per user inside a 24-hour window.
-
-        df["avg_spend_user"] = df.groupby("user_id")["amount"].transform(
-            lambda spend: spend.shift(1).expanding().mean()
-        )
-        # amount_ratio compares current transaction amount to the customer's historical average.
-        df["amount_ratio"] = np.where(
-            df["avg_spend_user"] > 0,
-            df["amount"] / df["avg_spend_user"],
-            0,
-        )
-
-        df["prev_lat"] = df.groupby("user_id")["lat"].shift(1)
-        df["prev_lon"] = df.groupby("user_id")["lon"].shift(1)
-        df["prev_ts"] = df.groupby("user_id")["timestamp"].shift(1)
-
-        df["dist_from_last_tx_km"] = haversine_km(
-            df["lat"],
-            df["lon"],
-            df["prev_lat"],
-            df["prev_lon"],
-        ).fillna(0)
-        # Fill missing distance values for first transactions where there is no previous location.
-
-        hours_since_previous = (
-            (df["timestamp"] - df["prev_ts"])
-            .dt.total_seconds()
-            .div(3600)
-            .clip(lower=1e-3)
-        )
-        df["travel_velocity_kmph"] = df["dist_from_last_tx_km"] / hours_since_previous
-
-        df["auth_method"] = pd.Categorical(df["auth_method"], categories=AUTH_METHODS)
-        df["category"] = pd.Categorical(df["category"], categories=CATEGORIES)
-        df = pd.get_dummies(
-            df,
-            columns=["auth_method", "category"],
-            drop_first=True,
-            dtype=int,
-        )
-        # Convert categorical features into the binary columns expected by the model.
-
-        df = df.drop(columns=NON_MODEL_COLUMNS)
-
-        for column in self.feature_columns:
-            if column not in df.columns:
-                df[column] = 0
-
-        numeric_columns = df.select_dtypes(include="number").columns
-        df[numeric_columns] = df[numeric_columns].fillna(0)
-
-        return df[self.feature_columns + [self.target_column]]
-
     def save_features(self, features: pd.DataFrame, seed: int) -> Path:
         """
         Persist engineered features to disk atomically.
@@ -251,17 +187,11 @@ class FeatureEngineer:
         return output_path
 
     # ------------------------------------------------------------------
-    # Feature computation
+    # Feature engineering
     # ------------------------------------------------------------------
 
     def engineer_transaction_features(self, transactions: pd.DataFrame) -> pd.DataFrame:
-        """Compute the full feature matrix from raw transactions.
-
-        Raises:
-            SchemaValidationError: if required columns are missing, the
-                target column is missing while required, or timestamps
-                cannot be parsed.
-        """
+        """Compute the full feature matrix from raw transactions."""
         self._validate_raw_schema(transactions)
 
         df = transactions.copy()
@@ -375,6 +305,10 @@ class FeatureEngineer:
         return df
 
     def _encode_categoricals(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        One-hot encode categorical features, ensuring that the resulting
+        dummy columns are consistent with the known schema
+        """
         for column, known_values in (
             ("auth_method", AUTH_METHODS),
             ("category", CATEGORIES),
@@ -418,10 +352,6 @@ class FeatureEngineer:
 
         return df[output_columns]
 
-    # ------------------------------------------------------------------
-    # Convenience orchestration
-    # ------------------------------------------------------------------
-
     def feature_engineer(
         self, csv_name: str = "simulated_transactions_seed_42.csv"
     ) -> pd.DataFrame:
@@ -435,12 +365,9 @@ class FeatureEngineer:
         return features
 
 
-# ----------------------------------------------------------------------
 # Module-level convenience wrappers (kept for backward compatibility with
 # existing call sites / notebooks). Prefer instantiating FeatureEngineer
 # directly in new code so config is explicit and reusable.
-# ----------------------------------------------------------------------
-
 
 def load_transactions(csv_name: str) -> pd.DataFrame:
     return FeatureEngineer().load_transactions(csv_name)
@@ -454,3 +381,7 @@ def feature_engineer(
     csv_name: str = "simulated_transactions_seed_42.csv",
 ) -> pd.DataFrame:
     return FeatureEngineer().feature_engineer(csv_name)
+
+if __name__ == "__main__":
+    engineer = FeatureEngineer()
+    engineer.feature_engineer("simulated_transactions_seed_42.csv")

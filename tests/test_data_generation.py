@@ -28,12 +28,13 @@ EXPECTED_RAW_COLUMNS = {
 
 
 def test_generated_transactions_include_realistic_card_fields(tmp_path):
-    transactions = generate_transactions_data(
+    output_path = generate_transactions_data(
         n_tx=2_500,
         n_users=120,
         seed=2026,
         output_dir=tmp_path,
     )
+    transactions = pd.read_csv(output_path)
 
     assert EXPECTED_RAW_COLUMNS.issubset(transactions.columns)
     assert transactions["amount"].gt(0).all()
@@ -52,12 +53,13 @@ def test_generated_transactions_include_realistic_card_fields(tmp_path):
 
 
 def test_generated_transactions_are_feature_engineering_compatible(tmp_path):
-    transactions = generate_transactions_data(
+    output_path = generate_transactions_data(
         n_tx=600,
         n_users=40,
         seed=77,
         output_dir=tmp_path,
     )
+    transactions = pd.read_csv(output_path)
 
     features = engineer_transaction_features(transactions)
 
@@ -67,17 +69,20 @@ def test_generated_transactions_are_feature_engineering_compatible(tmp_path):
 
 
 def test_generation_is_reproducible_for_seed(tmp_path):
-    first = generate_transactions_data(
+    first_path = generate_transactions_data(
         n_tx=200,
         n_users=30,
         seed=55,
         output_dir=tmp_path / "first",
     )
-    second = generate_transactions_data(
+    second_path = generate_transactions_data(
         n_tx=200,
         n_users=30,
         seed=55,
         output_dir=tmp_path / "second",
     )
+
+    first = pd.read_csv(first_path)
+    second = pd.read_csv(second_path)
 
     pd.testing.assert_frame_equal(first, second)

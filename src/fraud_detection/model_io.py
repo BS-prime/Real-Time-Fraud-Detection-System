@@ -16,11 +16,16 @@ logger = logging.getLogger(__name__)
 
 
 class ModelIO:
-    """Encapsulate model serialization and inference compatibility."""
+    """
+    Encapsulate model serialization and inference compatibility.
+    """
 
     @staticmethod
     def load_model(model_path: str | Path) -> Any:
-        """Load a saved model from disk, supporting joblib and XGBoost formats."""
+        """
+        Load a saved model from disk, supporting joblib and XGBoost formats.
+        """
+
         model_path = Path(model_path)
         if not model_path.exists():
             raise FileNotFoundError(f"Model file not found: {model_path}")
@@ -44,7 +49,10 @@ class ModelIO:
     def predict_fraud_probability(
         model: Any, features: pd.DataFrame | np.ndarray
     ) -> np.ndarray:
-        """Return fraud probability estimates for the positive class."""
+        """
+        Return fraud probability estimates for the positive class.
+        """
+        
         if hasattr(model, "predict_proba"):
             return np.asarray(model.predict_proba(features)[:, 1], dtype=float)
 
@@ -63,6 +71,10 @@ class ModelIO:
 
     @staticmethod
     def model_feature_names(model: Any) -> list[str] | None:
+        """
+        Retrieve the feature names expected by the model.
+        """
+        
         if hasattr(model, "feature_names_in_"):
             return [str(column) for column in model.feature_names_in_]
 
@@ -78,7 +90,10 @@ class ModelIO:
         model: Any,
         fallback_columns: list[str] | None = None,
     ) -> pd.DataFrame:
-        """Ensure the feature matrix matches the model's expected input schema."""
+        """
+        Ensure the feature matrix matches the model's expected input schema.
+        """
+
         expected_columns = (
             cls.model_feature_names(model) or fallback_columns or FEATURE_COLUMNS
         )
@@ -93,6 +108,9 @@ class ModelIO:
 
     @staticmethod
     def load_threshold(threshold_path: str | Path) -> float:
+        """
+        Load the optimal threshold for fraud detection.
+        """
         threshold_path = Path(threshold_path)
         if not threshold_path.exists():
             raise FileNotFoundError(f"Threshold file not found: {threshold_path}")
@@ -102,6 +120,10 @@ class ModelIO:
 
     @staticmethod
     def save_json(data: dict[str, Any], path: str | Path) -> None:
+        """
+        Save data to a JSON file.
+        """
+
         with Path(path).open("w", encoding="utf-8") as file:
             json.dump(data, file, indent=2)
 

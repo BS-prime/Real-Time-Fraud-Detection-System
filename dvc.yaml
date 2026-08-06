@@ -1,0 +1,31 @@
+vars:
+  - configs/params.yaml
+
+stages:
+
+  data_ingestion:
+    cmd: uv run src/fraud_detection/data_ingestion.py
+    deps:
+      - src/fraud_detection/data_ingestion.py
+      - src/fraud_detection/feature_schema.py
+      - src/fraud_detection/paths.py
+    params:
+      - configs/params.yaml:
+          - data_ingestion.seed
+          - data_ingestion.n_users
+          - data_ingestion.n_tx
+    outs:
+      - data/simulated/simulated_transactions_seed_${data_ingestion.seed}.csv
+  
+  feature_engineering:
+    cmd: uv run src/fraud_detection/feature_engineering.py
+    deps:
+      - src/fraud_detection/feature_engineering.py
+      - src/fraud_detection/feature_schema.py
+      - src/fraud_detection/geo.py
+      - src/fraud_detection/naming.py
+      - src/fraud_detection/paths.py
+      - data/simulated/simulated_transactions_seed_${data_ingestion.seed}.csv
+    outs:
+      - data/features/fraud_features_seed_${data_ingestion.seed}.csv
+

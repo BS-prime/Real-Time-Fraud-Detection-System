@@ -12,11 +12,13 @@ tries to look normal, and some normal behavior looks anomalous. Search for
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
+import csv
 import logging
 import random
 
 import pandas as pd
 from faker import Faker
+import yaml
 
 from fraud_detection.feature_schema import AUTH_METHODS
 from fraud_detection.paths import SIMULATED_DATA_DIR, create_dir
@@ -89,7 +91,9 @@ class UserProfile:
 
 
 class TransactionSimulator:
-    """Generate realistic synthetic transactions for model training."""
+    """
+    Generate realistic synthetic transactions for model training.
+    """
 
     def __init__(
         self,
@@ -116,7 +120,10 @@ class TransactionSimulator:
         self.profiles = self._create_user_profiles()
 
     def _create_user_profiles(self) -> dict[str, UserProfile]:
-        """Build a synthetic user population with spending habits and home locations."""
+        """
+        Build a synthetic user population with spending habits and home locations.
+        """
+
         profiles: dict[str, UserProfile] = {}
 
         for user_number in range(self.n_users):
@@ -137,7 +144,10 @@ class TransactionSimulator:
         return profiles
 
     def _generate_normal_transaction(self, profile: UserProfile) -> dict[str, object]:
-        """Generate a valid transaction for a user profile before fraud injection."""
+        """
+        Generate a valid transaction for a user profile before fraud injection.
+        """
+
         categories = list(CATEGORY_RULES)
         category = self.rng.choices(
             categories,
@@ -146,8 +156,17 @@ class TransactionSimulator:
         )[0]
         category_rules = CATEGORY_RULES[category]
 
+        # Capture the user's true previous transaction time *before* it
+        # gets overwritten below. Fraud patterns that need to reason about
+        # "time since the user's last activity" (impossible_travel,
+        # account_takeover) anchor to this value rather than to
+        # profile.last_tx_time, which by the time _apply_fraud_pattern
+        # runs has already been advanced to *this* transaction's own
+        # (pre-fraud) timestamp. Anchoring to the stale value silently
+        # weakened those patterns' intended "unusually soon/far" signal.
+        previous_tx_time = profile.last_tx_time
         minutes_since_last_tx = self.rng.randint(5, profile.gap_minutes * 2)
-        timestamp = profile.last_tx_time + timedelta(minutes=minutes_since_last_tx)
+        timestamp = previous_tx_time + timedelta(minutes=minutes_since_last_tx)
         profile.last_tx_time = timestamp
 
         amount = round(self.rng.uniform(0.5, 1.8) * category_rules["typical_amount"], 2)
@@ -180,6 +199,10 @@ class TransactionSimulator:
             "transaction_status": "approved",
             "fraud_pattern": "legitimate",
             "is_fraud": 0,
+            # Internal-only bookkeeping field, consumed by
+            # _apply_fraud_pattern and stripped in _transaction_rows
+            # before a row is yielded. Never appears in output.
+            "_previous_tx_time": previous_tx_time,
         }
 
         self._maybe_inject_legit_anomaly(transaction, profile)
@@ -298,12 +321,17 @@ class TransactionSimulator:
             # leaves a gap wide enough to *look* physically plausible
             # (a few hours), so catching it requires reasoning about
             # distance vs. elapsed time rather than a single threshold.
+            #
+            # Anchored to the user's true previous transaction time
+            # (transaction["_previous_tx_time"]), not profile.last_tx_time,
+            # which at this point already reflects the current (pre-fraud)
+            # transaction rather than the prior one.
             gap_minutes = (
                 self.rng.randint(6, 45)
                 if not is_stealthy
                 else self.rng.randint(120, 360)
             )
-            transaction["timestamp"] = profile.last_tx_time + timedelta(
+            transaction["timestamp"] = transaction["_previous_tx_time"] + timedelta(
                 minutes=gap_minutes
             )
             transaction["merchant_city"] = distant_city["name"]
@@ -330,12 +358,19 @@ class TransactionSimulator:
             # genuine behavior are a device change (itself noised by
             # _apply_signal) and a shortened gap since the last
             # transaction, both weak signals rather than hard rules.
+            #
+            # Anchored to transaction["_previous_tx_time"] for the same
+            # reason as impossible_travel above -- otherwise the
+            # "shortened gap" signal is computed relative to a timestamp
+            # that was itself only just generated for this row, which
+            # dilutes the intended "unusually soon after last activity"
+            # tell.
             if self._apply_signal():
                 transaction["device_id"] = f"new_{self.fake.uuid4()[:10]}"
             shortened_gap = max(
                 5, int(profile.gap_minutes * self.rng.uniform(0.1, 0.4))
             )
-            transaction["timestamp"] = profile.last_tx_time + timedelta(
+            transaction["timestamp"] = transaction["_previous_tx_time"] + timedelta(
                 minutes=shortened_gap
             )
 
@@ -345,47 +380,143 @@ class TransactionSimulator:
         directory = create_dir(self.output_dir)
         return directory / f"simulated_transactions_seed_{self.seed}.csv"
 
-    def generate(self, n_tx: int = 10_000) -> pd.DataFrame:
-        rows: list[dict[str, object]] = []
+    def _transaction_columns(self) -> list[str]:
+        """
+        Define the column order for the output CSV. This ensures consistent ordering regardless of how dictionaries are iterated or how DataFrames are constructed.
+        """
+
+        return [
+            "tx_id",
+            "timestamp",
+            "user_id",
+            "amount",
+            "category",
+            "merchant_name",
+            "merchant_city",
+            "merchant_country",
+            "channel",
+            "device_id",
+            "auth_method",
+            "lat",
+            "lon",
+            "ip_address",
+            "customer_segment",
+            "transaction_status",
+            "fraud_pattern",
+            "is_fraud",
+        ]
+
+    def _transaction_rows(self, n_tx: int = 1_000_000) :
+        """
+        Generate transaction rows as dictionaries, yielding one at a time to avoid
+        holding the entire dataset in memory. This is useful for generating very large datasets without running out of memory.
+        """
 
         for _ in range(n_tx):
             profile = self.profiles[self.rng.choice(list(self.profiles))]
             transaction = self._generate_normal_transaction(profile)
             transaction = self._apply_fraud_pattern(transaction, profile)
             profile.last_tx_time = transaction["timestamp"]
-            rows.append(transaction)
+            # Drop internal bookkeeping field before this row is exposed
+            # to callers/CSV output.
+            del transaction["_previous_tx_time"]
+            yield transaction
 
-        return pd.DataFrame(rows)
+    def generate(self, n_tx: int = 10_000) -> pd.DataFrame:
+        """
+        Generate a DataFrame of synthetic transactions.
+        """
+        if n_tx <= 0:
+            raise ValueError("n_tx must be a positive integer")
+        
+        if n_tx > 100_000:
+            logger.warning(
+                "Generating a very large number of transactions (%d). "
+                "This may take a while and consume significant memory.",
+                n_tx,
+            )
+        return pd.DataFrame(self._transaction_rows(n_tx))
 
-    def save(self, transactions: pd.DataFrame) -> Path:
+    def save(
+        self, transactions: pd.DataFrame | list[dict[str, object]] | object
+    ) -> Path:
+        """
+        Save the generated transactions to a CSV file.
+        """
+
         output_path = self._output_path()
-        transactions.to_csv(output_path, index=False)
+
+        # If the transactions are already a DataFrame, use its built-in CSV writer.
+        if isinstance(transactions, pd.DataFrame):
+            transactions.to_csv(output_path, index=False)
+            row_count = len(transactions)
+
+        # If the transactions are a list of dictionaries, write them manually with csv.DictWriter.
+        else:
+            rows_written = 0
+            fieldnames = self._transaction_columns()
+            with output_path.open("w", newline="", encoding="utf-8") as stream:
+                writer = csv.DictWriter(stream, fieldnames=fieldnames)
+                writer.writeheader()
+                for row in transactions:
+                    writer.writerow({key: row[key] for key in fieldnames})
+                    rows_written += 1
+            row_count = rows_written
+
         logger.info(
             "Saved simulated transaction data to %s with %d rows",
             output_path,
-            len(transactions),
+            row_count,
         )
         return output_path
 
     def generate_transactions_data(
         self,
-        n_tx: int = 10_000,
-    ) -> pd.DataFrame:
-        transactions = self.generate(n_tx)
-        self.save(transactions)
-        return transactions
+        n_tx: int = 1_000_000,
+    ) -> Path:
+        """
+        Generate simulated transaction data and save it to a CSV file.
+        """
+
+        return self.save(self._transaction_rows(n_tx))
 
 
 def generate_transactions_data(
-    n_tx: int = 10_000,
-    n_users: int = 500,
+    n_tx: int = 1_000_000,
+    n_users: int = 5_000,
     seed: int = 42,
     output_dir: str | Path | None = None,
-) -> pd.DataFrame:
-    """Generate synthetic transactions and save them under ``data/simulated``."""
+) -> Path:
+    """
+    Generate synthetic transactions and save them under `data/simulated` directory.
+    """
+
     simulator = TransactionSimulator(
         n_users=n_users,
         seed=seed,
         output_dir=output_dir,
     )
     return simulator.generate_transactions_data(n_tx=n_tx)
+
+def load_params(path: str | Path = Path("configs/params.yaml")) -> dict[str, object]:
+    """
+    Load parameters from a YAML file.
+    """
+
+    ROOT_DIR = Path(__file__).parents[2]
+    path = ROOT_DIR / path
+
+    with open(path, "r", encoding="utf-8") as f:
+        params = yaml.safe_load(f)
+
+    return params
+if __name__ == "__main__":
+
+    params = load_params()["data_ingestion"]
+    
+    generate_transactions_data(
+        n_tx=params["n_tx"], 
+        n_users=params["n_users"], 
+        seed=params["seed"],
+    )
+    

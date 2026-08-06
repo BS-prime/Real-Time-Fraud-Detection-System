@@ -1,0 +1,4 @@
+data_ingestion:
+  seed: 42
+  n_users: 5000
+  n_tx: 1000000
