@@ -1,8 +1,8 @@
 vars:
   - configs/params.yaml
+  - configs/hyperparams.yaml
 
 stages:
-
   data_ingestion:
     cmd: uv run src/fraud_detection/data_ingestion.py
     deps:
@@ -26,6 +26,29 @@ stages:
       - src/fraud_detection/naming.py
       - src/fraud_detection/paths.py
       - data/simulated/simulated_transactions_seed_${data_ingestion.seed}.csv
+    params:
+      - configs/params.yaml:
+          - data_ingestion.seed
+          - feature_engineering.test_size
+          - feature_engineering.rolling_window
+          - feature_engineering.min_hours_between_tx
     outs:
-      - data/features/fraud_features_seed_${data_ingestion.seed}.csv
-
+      - data/features/fraud_features_train_seed_${data_ingestion.seed}.csv
+      - data/features/fraud_features_test_seed_${data_ingestion.seed}.csv
+  
+  model_training:
+    cmd: uv run src/fraud_detection/model_training.py
+    deps:
+      - src/fraud_detection/naming.py
+      - src/fraud_detection/paths.py
+      - data/features/fraud_features_train_seed_${data_ingestion.seed}.csv
+      - data/features/fraud_features_test_seed_${data_ingestion.seed}.csv
+      - src/fraud_detection/model_training.py
+    params:
+      - configs/params.yaml:
+          - data_ingestion.seed
+      - configs/hyperparams.yaml:
+          - models
+    outs:
+      - artifacts/models/
+      

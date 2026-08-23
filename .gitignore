@@ -41,6 +41,8 @@ data/simulated/
 data/features/
 artifacts/models/
 artifacts/model_thresholds/
+artifacts/model_paths
 reports/model_evaluation/
 reports/drift_monitoring/
 reports/shap/
+

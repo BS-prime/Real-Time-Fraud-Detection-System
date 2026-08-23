@@ -3,11 +3,11 @@ Cost-sensitive threshold optimization.
 """
 
 from pathlib import Path
+from sklearn.metrics import confusion_matrix
 import logging
 import numpy as np
 import pandas as pd
-from sklearn.metrics import confusion_matrix
-from pathlib import Path
+
 
 from fraud_detection.model_io import (
     align_features_to_model,
@@ -26,7 +26,10 @@ def business_cost(
     cost_fp: float,
     cost_fn: float,
 ) -> float:
-    """Calculate the business cost of a binary fraud decision rule."""
+    """
+    Calculate the business cost of a binary fraud decision rule.
+    """
+
     _, false_positives, false_negatives, _ = confusion_matrix(
         y_true,
         y_pred,
@@ -82,7 +85,10 @@ class ThresholdOptimizer:
         cost_fn: float = 10.0,
         save: bool = True,
     ) -> tuple[np.ndarray, np.ndarray]:
-        """Search for the decision threshold that minimizes business cost on test data."""
+        """
+        Search for the decision threshold that minimizes business cost on test data.
+        """
+
         model_path = self.model_dir / model_name
         model = load_model(model_path)
         X_test_aligned = align_features_to_model(

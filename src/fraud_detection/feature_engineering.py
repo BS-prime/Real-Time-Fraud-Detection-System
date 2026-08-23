@@ -26,12 +26,12 @@ from __future__ import annotations
 import logging
 import os
 import tempfile
-from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Sequence
+from typing import Any
 
 import numpy as np
 import pandas as pd
+import yaml
 
 from fraud_detection.feature_schema import (
     AUTH_METHODS,
@@ -40,19 +40,25 @@ from fraud_detection.feature_schema import (
     TARGET_COLUMN,
 )
 from fraud_detection.geo import haversine_km
-from fraud_detection.naming import seed_from_filename
-from fraud_detection.paths import FEATURE_DATA_DIR, SIMULATED_DATA_DIR, create_dir
+from fraud_detection.paths import (
+    FEATURE_DATA_DIR,
+    PARAMS_CONFIG_PATH,
+    SIMULATED_DATA_DIR,
+    create_dir,
+    simulated_transactions_path,
+    test_feature_file_path,
+    train_feature_file_path,
+)
 
 logger = logging.getLogger(__name__)
 
 __all__ = [
-    "FeatureEngineeringConfig",
+    "FeatureEngineer",
     "FeatureEngineeringError",
     "SchemaValidationError",
-    "FeatureEngineer",
-    "load_transactions",
+    "batch_feature_engineer",
     "engineer_transaction_features",
-    "feature_engineer",
+    "load_transactions",
 ]
 
 # Columns that must exist in the raw transaction CSV for feature
@@ -69,8 +75,8 @@ REQUIRED_RAW_COLUMNS = [
     "category",
 ]
 
-# Identifier / raw columns that are useful for joins, debugging, and
-# feature computation, but must never leak into the model matrix.
+# Columns that are used in feature engineering but are not part of the
+# final model matrix. These are dropped after feature engineering is complete, so that the final feature matrix contains only model-ready features and the target column (if present).
 NON_MODEL_COLUMNS = [
     "tx_id",
     "prev_lat",
@@ -84,31 +90,15 @@ NON_MODEL_COLUMNS = [
 
 
 class FeatureEngineeringError(Exception):
-    """Base class for feature-engineering failures."""
+    """
+    Base class for feature-engineering failures.
+    """
 
 
 class SchemaValidationError(FeatureEngineeringError):
-    """Raised when the input transaction data doesn't match expectations."""
-
-
-@dataclass(frozen=True)
-class FeatureEngineeringConfig:
     """
-    Tunable parameters for feature engineering.
-
-    Kept separate from FeatureEngineer's constructor args so that all
-    "how do we compute features" knobs live in one serializable place
-    (useful for logging config alongside a model run, or for hashing
-    config into an experiment/feature-store key).
+    Raised when the input transaction data doesn't match expectations.
     """
-
-    rolling_window: str = "24h"
-    min_hours_between_tx: float = 1e-3  # floor to avoid div-by-zero on velocity
-    feature_columns: Sequence[str] = field(
-        default_factory=lambda: list(FEATURE_COLUMNS)
-    )
-    target_column: str = TARGET_COLUMN
-    require_target: bool = True  # False for inference-time feature building
 
 
 class FeatureEngineer:
@@ -118,54 +108,75 @@ class FeatureEngineer:
 
     def __init__(
         self,
-        config: FeatureEngineeringConfig | None = None,
-        simulated_dir: Path = SIMULATED_DATA_DIR,
-        feature_dir: Path = FEATURE_DATA_DIR,
+        params_config_path: Path = PARAMS_CONFIG_PATH,
+        csv_path: Path = SIMULATED_DATA_DIR / "simulated_transactions_seed_42.csv",
+        train_output_path: Path = FEATURE_DATA_DIR / "fraud_features_train_seed_42.csv",
+        test_output_path: Path = FEATURE_DATA_DIR / "fraud_features_test_seed_42.csv",
     ) -> None:
-        self.config = config or FeatureEngineeringConfig()
-        self.simulated_dir = Path(simulated_dir)
-        self.feature_dir = Path(feature_dir)
+        self.params_config_path = params_config_path
+        self.params_config = self._load_params_config()
+        self.seed = self.params_config.get("seed", 42)
+        self.csv_path = simulated_transactions_path(self.seed) or csv_path
+        self.train_output_path = train_feature_file_path(self.seed) or train_output_path
+        self.test_output_path = test_feature_file_path(self.seed) or test_output_path
 
-    # ------------------------------------------------------------------
-    # I/O
-    # ------------------------------------------------------------------
-
-    def load_transactions(self, csv_name: str) -> pd.DataFrame:
-        """Load a raw transaction CSV from the simulated data directory.
-
-        Raises:
-            FileNotFoundError: if the CSV doesn't exist.
-            SchemaValidationError: if the file is empty or missing
-                required columns.
+    def _load_params_config(self) -> dict[str, Any]:
+        """
+        Read the model training parameters from YAML configuration.
         """
 
-        csv_path = self.simulated_dir / csv_name
+        if not self.params_config_path.exists():
+            raise FileNotFoundError(
+                f"Training parameters configuration not found: {self.params_config_path}"
+            )
+
+        with self.params_config_path.open("r", encoding="utf-8") as file:
+            return yaml.safe_load(file)["feature_engineering"]
+
+    def load_transactions(self, csv_path: Path) -> pd.DataFrame:
+        """
+        Load a raw transaction CSV from the simulated data directory and validate that it contains the required columns. Returns a DataFrame of the raw transactions.
+        """
+
+        csv_path = self.csv_path
         if not csv_path.exists():
             raise FileNotFoundError(f"Transaction file not found: {csv_path}")
 
+        print(f"Loading csv from: {csv_path}")
         df = pd.read_csv(csv_path)
-
-        if df.empty:
-            raise SchemaValidationError(f"{csv_path} contains no rows")
-
-        missing = [c for c in REQUIRED_RAW_COLUMNS if c not in df.columns]
-        if missing:
-            raise SchemaValidationError(
-                f"{csv_path} is missing required column(s): {missing}"
-            )
 
         return df
 
-    def save_features(self, features: pd.DataFrame, seed: int) -> Path:
+    def train_test_split(
+        self, features: pd.DataFrame
+    ) -> tuple[pd.DataFrame, pd.DataFrame]:
         """
-        Persist engineered features to disk atomically.
+        Split the feature DataFrame into training and testing sets based on the configured test size.
+        """
 
-        Writes to a temp file in the same directory and renames it into
-        place, so a process crash or concurrent read never observes a
-        partially written feature file.
+        test_size = self.params_config.get("test_size", 0.2)
+
+        if not (0 < test_size < 1):
+            raise ValueError(
+                f"Invalid test_size: {test_size}. Must be between 0 and 1."
+            )
+
+        index = len(features) * test_size
+
+        # Split based on time ordering to avoid data leakage from future transactions into the training set.
+        features = features.sort_values(["timestamp", "user_id"]).reset_index(drop=True)
+        train_df = features[: int(index)]
+        test_df = features[int(index) :]
+
+        return train_df, test_df
+
+    def save_features(self, features: pd.DataFrame, file_path: Path) -> None:
         """
-        output_dir = create_dir(self.feature_dir)
-        output_path = output_dir / f"fraud_features_seed_{seed}.csv"
+        Save the engineered feature matrix to a CSV in the feature data directory.
+        """
+
+        output_dir = create_dir(file_path.parent)
+        output_path = output_dir / file_path.name
 
         fd, tmp_name = tempfile.mkstemp(
             prefix=output_path.stem + ".", suffix=".tmp.csv", dir=output_dir
@@ -174,7 +185,7 @@ class FeatureEngineer:
         tmp_path = Path(tmp_name)
         try:
             features.to_csv(tmp_path, index=False)
-            os.replace(tmp_path, output_path)  # atomic on POSIX and Windows
+            os.replace(tmp_path, output_path)
         except Exception:
             tmp_path.unlink(missing_ok=True)
             raise
@@ -184,14 +195,13 @@ class FeatureEngineer:
             output_path,
             features.shape,
         )
-        return output_path
-
-    # ------------------------------------------------------------------
-    # Feature engineering
-    # ------------------------------------------------------------------
 
     def engineer_transaction_features(self, transactions: pd.DataFrame) -> pd.DataFrame:
-        """Compute the full feature matrix from raw transactions."""
+        """
+        Engineer features from raw transaction data.
+        Returns a DataFrame containing only the model-ready feature columns
+        """
+
         self._validate_raw_schema(transactions)
 
         df = transactions.copy()
@@ -206,6 +216,10 @@ class FeatureEngineer:
         return df
 
     def _validate_raw_schema(self, transactions: pd.DataFrame) -> None:
+        """
+        Validate that the input DataFrame has the required columns and no duplicate transaction IDs. Raises SchemaValidationError if validation fails.
+        """
+
         if transactions.empty:
             raise SchemaValidationError("Input transaction DataFrame has no rows")
 
@@ -214,11 +228,11 @@ class FeatureEngineer:
             raise SchemaValidationError(f"Missing required column(s): {missing}")
 
         if (
-            self.config.require_target
-            and self.config.target_column not in transactions.columns
+            self.params_config.get("require_target")
+            and self.params_config.get("target_column") not in transactions.columns
         ):
             raise SchemaValidationError(
-                f"Target column '{self.config.target_column}' is required but absent. "
+                f"Target column '{self.params_config.get('target_column')}' is required but absent. "
                 "Pass require_target=False in FeatureEngineeringConfig for inference-time use."
             )
 
@@ -229,6 +243,10 @@ class FeatureEngineer:
             )
 
     def _prepare_time_ordering(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Prepare the DataFrame for time-based operations by ensuring the timestamp column is properly formatted.
+        """
+
         try:
             df["timestamp"] = pd.to_datetime(df["timestamp"], utc=True, errors="raise")
         except (ValueError, TypeError) as exc:
@@ -244,17 +262,24 @@ class FeatureEngineer:
         return df.sort_values(["user_id", "timestamp"]).reset_index(drop=True)
 
     def _add_calendar_features(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        add calendar-based features such as hour of day, day of week, and transaction count in the last 24 hours for each user.
+        """
+
         df["hour"] = df["timestamp"].dt.hour
         df["day_of_week"] = df["timestamp"].dt.dayofweek
         df["tx_count_24h"] = (
             df.groupby("user_id")
-            .rolling(self.config.rolling_window, on="timestamp")["tx_id"]
+            .rolling(self.params_config.get("rolling_window"), on="timestamp")["tx_id"]
             .count()
             .values
         )
         return df
 
     def _add_spend_features(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Add features related to transaction amounts, including the average spend of the user and the ratio of the current amount to the average spend."""
+
         if (df["amount"] < 0).any():
             n_negative = int((df["amount"] < 0).sum())
             raise SchemaValidationError(
@@ -276,12 +301,14 @@ class FeatureEngineer:
         return df
 
     def _add_geo_velocity_features(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Add geographical and velocity-based features.
+        """
         df["prev_lat"] = df.groupby("user_id")["lat"].shift(1)
         df["prev_lon"] = df.groupby("user_id")["lon"].shift(1)
         df["prev_ts"] = df.groupby("user_id")["timestamp"].shift(1)
 
-        # NaN (no previous tx for this user) -> distance of 0, i.e. "no
-        # movement to measure yet", not "traveled zero km".
+        # Compute distance from the previous transaction in kilometers using the haversine formula. If there is no previous transaction, fill with 0.0.
         df["dist_from_last_tx_km"] = haversine_km(
             df["lat"], df["lon"], df["prev_lat"], df["prev_lon"]
         ).fillna(0.0)
@@ -296,8 +323,9 @@ class FeatureEngineer:
         hours_since_previous = (
             time_delta.dt.total_seconds()
             .div(3600)
-            .clip(lower=self.config.min_hours_between_tx)
+            .clip(lower=self.params_config["min_hours_between_tx"])
         )
+
         df["travel_velocity_kmph"] = (
             df["dist_from_last_tx_km"] / hours_since_previous
         ).fillna(0.0)
@@ -306,8 +334,7 @@ class FeatureEngineer:
 
     def _encode_categoricals(self, df: pd.DataFrame) -> pd.DataFrame:
         """
-        One-hot encode categorical features, ensuring that the resulting
-        dummy columns are consistent with the known schema
+        Encode categorical features as one-hot (dummy) variables. Warn if any unknown categories are present, and treat them as all-zero dummies.
         """
         for column, known_values in (
             ("auth_method", AUTH_METHODS),
@@ -330,58 +357,61 @@ class FeatureEngineer:
 
     def _align_to_feature_schema(self, df: pd.DataFrame) -> pd.DataFrame:
         """
-        Ensure every expected feature column exists, then select the
-        final column set in a fixed order.
-
-        Unseen dummy columns (e.g. a category value that never appeared
-        in this batch) are added as all-zero; this is safe *only* because
-        `_encode_categoricals` fixes the categorical levels up front, so
-        "missing column" here means "value didn't occur in this batch",
-        never "unknown category silently dropped".
+        Ensure that the DataFrame contains all expected feature columns, filling missing ones with zeros. Also fill any remaining NaNs in numeric columns with zeros. Finally, return only the columns that are part of the model schema, optionally including the target column.
         """
-        for column in self.config.feature_columns:
+
+        for column in FEATURE_COLUMNS:
             if column not in df.columns:
                 df[column] = 0
 
         numeric_columns = df.select_dtypes(include="number").columns
         df[numeric_columns] = df[numeric_columns].fillna(0)
 
-        output_columns = list(self.config.feature_columns)
-        if self.config.require_target:
-            output_columns = output_columns + [self.config.target_column]
+        output_columns = FEATURE_COLUMNS + [TARGET_COLUMN]
 
         return df[output_columns]
 
     def feature_engineer(
-        self, csv_name: str = "simulated_transactions_seed_42.csv"
-    ) -> pd.DataFrame:
+        self, csv_path: Path = SIMULATED_DATA_DIR / "simulated_transactions_seed_42.csv"
+    ) -> tuple(Path, Path):
         """
         Load, engineer, and persist features for a single raw CSV.
         """
-        seed = seed_from_filename(csv_name)
-        transactions = self.load_transactions(csv_name)
-        features = self.engineer_transaction_features(transactions)
-        self.save_features(features, seed)
-        return features
+
+        transactions = self.load_transactions(csv_path)
+        train_df, test_df = self.train_test_split(transactions)
+        train_df  = self.engineer_transaction_features(train_df)
+        self.save_features(train_df, self.train_output_path)
+        self.save_features(test_df, self.test_output_path)
+        return self.train_output_path, self.test_output_path
 
 
-# Module-level convenience wrappers (kept for backward compatibility with
-# existing call sites / notebooks). Prefer instantiating FeatureEngineer
-# directly in new code so config is explicit and reusable.
+# FEATURE ENGINEERING API FUNCTIONS
 
-def load_transactions(csv_name: str) -> pd.DataFrame:
-    return FeatureEngineer().load_transactions(csv_name)
+
+def load_transactions(csv_path: Path) -> pd.DataFrame:
+    """
+    Validate and load a raw transaction CSV from the simulated data directory. Returns a DataFrame of the raw transactions.
+    """
+    return FeatureEngineer().load_transactions(csv_path)
 
 
 def engineer_transaction_features(transactions: pd.DataFrame) -> pd.DataFrame:
+    """
+    Engineer features for a DataFrame of transactions.
+    """
     return FeatureEngineer().engineer_transaction_features(transactions)
 
 
-def feature_engineer(
-    csv_name: str = "simulated_transactions_seed_42.csv",
+def batch_feature_engineer(
+    csv_path: Path = SIMULATED_DATA_DIR / "simulated_transactions_seed_42.csv",
 ) -> pd.DataFrame:
-    return FeatureEngineer().feature_engineer(csv_name)
+    """
+    Perform feature engineer and save train and test as csv.
+    """
+    return FeatureEngineer().feature_engineer(csv_path)
+
 
 if __name__ == "__main__":
     engineer = FeatureEngineer()
-    engineer.feature_engineer("simulated_transactions_seed_42.csv")
+    engineer.feature_engineer(csv_path=engineer.csv_path)

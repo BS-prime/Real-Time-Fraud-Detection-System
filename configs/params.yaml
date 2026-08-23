@@ -1,4 +1,22 @@
+
 data_ingestion:
-  seed: 42
+  seed: 42 # !!! should be the same as feature_engineering.seed and model_training.seed
   n_users: 5000
   n_tx: 1000000
+  fraud_rate: 0.015
+  signal_noise_rate: 0.15  # see _apply_signal() docstring
+  legit_anomaly_rate: 0.04  # see _maybe_inject_legit_anomaly() docstring
+  stealthy_fraud_share: 0.30
+
+
+feature_engineering:
+  seed: 42 # !!! should be the same as data_ingestion.seed and model_training.seed
+  test_size: 0.2
+  rolling_window: "24h"
+  min_hours_between_tx: 0.001
+
+model_training:
+  seed: 42 # !!! should be the same as data_ingestion.seed and feature_engineering.seed
+  cv_folds: 3
+  random_state: 42
+  scoring: "pr_auc"

@@ -1,11 +1,13 @@
-"""End-to-end training pipeline."""
+"""
+# End-to-end training pipeline for fraud detection model.
+"""
 
+from encodings import utf_16
 import logging
-from datetime import datetime
-from pathlib import Path
+from datetime import UTC, datetime
 
 from fraud_detection.data_ingestion import generate_transactions_data
-from fraud_detection.feature_engineering import feature_engineer
+from fraud_detection.feature_engineering import batch_feature_engineer
 from fraud_detection.model_evaluation import model_evaluator
 from fraud_detection.model_training import model_trainer
 from fraud_detection.threshold_optimization import threshold_optimizer
@@ -32,7 +34,7 @@ class TrainingPipeline:
         n_tx: int = 1_000_000,
         n_users: int = 5_000,
         seed: int = 42,
-        algo_name: str = "xgboost",
+        algo_name: str = "XGBoost",
     ) -> dict[str, object]:
 
         # 0. logging the pipeline start
@@ -46,7 +48,7 @@ class TrainingPipeline:
 
         # 2. perform feature engineering
         logger.info("[2/5] %s", self.steps[1])
-        feature_engineer(simulated_file)
+        batch_feature_engineer(simulated_file)
         features_file = f"fraud_features_seed_{seed}.csv"
 
         # 3. model training
@@ -63,7 +65,7 @@ class TrainingPipeline:
         model_evaluator(model_name, X_test, y_test, y_prob, y_pred)
 
         # 6. logging the ending of pipeline
-        end_time = datetime.now()
+        end_time = datetime.now(tz=UTC)
         duration = (end_time - start_time).total_seconds()
 
         logger.info("PIPELINE COMPLETED SUCCESSFULLY in %.2f seconds", duration)

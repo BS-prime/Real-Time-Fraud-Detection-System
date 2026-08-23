@@ -9,27 +9,27 @@ tries to look normal, and some normal behavior looks anomalous. Search for
 "OVERLAP:" comments below for the specific places this is engineered in.
 """
 
-from dataclasses import dataclass
-from datetime import datetime, timedelta
-from pathlib import Path
 import csv
 import logging
 import random
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
+from typing import Any
 
 import pandas as pd
-from faker import Faker
 import yaml
+from faker import Faker
 
 from fraud_detection.feature_schema import AUTH_METHODS
-from fraud_detection.paths import SIMULATED_DATA_DIR, create_dir
+from fraud_detection.paths import (
+    PARAMS_CONFIG_PATH,
+    SIMULATED_DATA_DIR,
+    create_dir,
+    simulated_transactions_path,
+)
 
 logger = logging.getLogger(__name__)
-
-START_DATE = datetime(2026, 1, 1, 8, 0)
-DEFAULT_FRAUD_RATE = 0.015
-DEFAULT_SIGNAL_NOISE_RATE = 0.15  # see _apply_signal() docstring
-DEFAULT_LEGIT_ANOMALY_RATE = 0.04  # see _maybe_inject_legit_anomaly() docstring
-DEFAULT_STEALTHY_FRAUD_SHARE = 0.30  # see _apply_fraud_pattern() docstring
 
 CITIES = [
     {"name": "New York", "country": "US", "lat": 40.7128, "lon": -74.0060},
@@ -79,7 +79,9 @@ FRAUD_PATTERNS = [
 
 @dataclass
 class UserProfile:
-    """Basic customer behavior used to make transactions feel personal."""
+    """
+    Basic customer behavior used to make transactions feel personal.
+    """
 
     user_id: str
     segment: str
@@ -97,27 +99,51 @@ class TransactionSimulator:
 
     def __init__(
         self,
-        n_users: int = 500,
+        n_tx: int = 1_000_000,
+        n_users: int = 5_000,
         seed: int = 42,
-        fraud_rate: float = DEFAULT_FRAUD_RATE,
-        signal_noise_rate: float = DEFAULT_SIGNAL_NOISE_RATE,
-        legit_anomaly_rate: float = DEFAULT_LEGIT_ANOMALY_RATE,
-        stealthy_fraud_share: float = DEFAULT_STEALTHY_FRAUD_SHARE,
-        output_dir: Path | str | None = None,
+        fraud_rate: float = 0.015,
+        signal_noise_rate: float = 0.15,
+        legit_anomaly_rate: float = 0.04,
+        stealthy_fraud_share: float = 0.30,
+        params_path: Path = PARAMS_CONFIG_PATH,
+        output_dir: Path = SIMULATED_DATA_DIR,
     ) -> None:
-        self.n_users = n_users
-        self.seed = seed
-        self.fraud_rate = fraud_rate
-        self.signal_noise_rate = signal_noise_rate
-        self.legit_anomaly_rate = legit_anomaly_rate
-        self.stealthy_fraud_share = stealthy_fraud_share
-        self.output_dir = (
-            Path(output_dir) if output_dir is not None else SIMULATED_DATA_DIR
+        self.params_path = params_path
+        self.params_config = self._load_params_config()
+        self.n_tx = self.params_config.get("n_tx", 1_000_000) or n_tx
+        self.n_users = self.params_config.get("n_users", 5000) or n_users
+        self.seed = self.params_config.get("seed", 42) or seed
+        self.fraud_rate = self.params_config.get("fraud_rate", 0.015) or fraud_rate
+        self.signal_noise_rate = (
+            self.params_config.get("signal_noise_rate", 0.15) or signal_noise_rate
         )
+        self.legit_anomaly_rate = (
+            self.params_config.get("legit_anomaly_rate", 0.04) or legit_anomaly_rate
+        )
+        self.stealthy_fraud_share = (
+            self.params_config.get("stealthy_fraud_share", 0.30) or stealthy_fraud_share
+        )
+        self.output_file_name = simulated_transactions_path(self.seed)
+        self.output_dir = output_dir
+        self.start_date = datetime(2023, 1, 1, 0, 0, 0, tzinfo=UTC)
         self.fake = Faker()
-        self.fake.seed_instance(seed)
-        self.rng = random.Random(seed)
+        self.fake.seed_instance(self.seed)
+        self.rng = random.Random(self.seed)
         self.profiles = self._create_user_profiles()
+
+    def _load_params_config(self) -> dict[str, Any]:
+        """
+        Read the model training parameters from YAML configuration.
+        """
+
+        if not self.params_path.exists():
+            raise FileNotFoundError(
+                f"Training parameters configuration not found: {self.params_path}"
+            )
+
+        with self.params_path.open("r", encoding="utf-8") as file:
+            return yaml.safe_load(file)["data_ingestion"]
 
     def _create_user_profiles(self) -> dict[str, UserProfile]:
         """
@@ -138,7 +164,7 @@ class TransactionSimulator:
                 devices=[self.fake.uuid4()[:10] for _ in range(self.rng.randint(1, 3))],
                 avg_spend=segment_rules["avg_spend"],
                 gap_minutes=segment_rules["gap_minutes"],
-                last_tx_time=START_DATE + timedelta(days=self.rng.randint(0, 14)),
+                last_tx_time=self.start_date + timedelta(days=self.rng.randint(0, 14)),
             )
 
         return profiles
@@ -148,6 +174,7 @@ class TransactionSimulator:
         Generate a valid transaction for a user profile before fraud injection.
         """
 
+        # 1. Pick a category based on the user's segment and the defined weights.
         categories = list(CATEGORY_RULES)
         category = self.rng.choices(
             categories,
@@ -156,30 +183,27 @@ class TransactionSimulator:
         )[0]
         category_rules = CATEGORY_RULES[category]
 
-        # Capture the user's true previous transaction time *before* it
-        # gets overwritten below. Fraud patterns that need to reason about
-        # "time since the user's last activity" (impossible_travel,
-        # account_takeover) anchor to this value rather than to
-        # profile.last_tx_time, which by the time _apply_fraud_pattern
-        # runs has already been advanced to *this* transaction's own
-        # (pre-fraud) timestamp. Anchoring to the stale value silently
-        # weakened those patterns' intended "unusually soon/far" signal.
+        # 2. Generate a timestamp for the transaction based on the user's last transaction time and their typical gap.
         previous_tx_time = profile.last_tx_time
         minutes_since_last_tx = self.rng.randint(5, profile.gap_minutes * 2)
         timestamp = previous_tx_time + timedelta(minutes=minutes_since_last_tx)
         profile.last_tx_time = timestamp
 
+        # 3. Generate an amount based on the category's typical amount, with some randomness. Certain categories like "tech" and "travel" have a higher potential for larger amounts.
         amount = round(self.rng.uniform(0.5, 1.8) * category_rules["typical_amount"], 2)
         if category in {"tech", "travel"}:
             amount = round(amount * self.rng.uniform(1.2, 2.4), 2)
 
+        # 4. Choose a city for the transaction. For most categories, use the user's home city. For "travel", pick a random city from the list.
         city = profile.home_city
         if category == "travel":
             city = self.rng.choice(CITIES)
 
+        # 5. Randomly select an authentication method and a device ID from the user's known devices.
         auth_method = self.rng.choice(AUTH_METHODS)
         device_id = self.rng.choice(profile.devices)
 
+        # 6. Construct the transaction dictionary with all the generated values, including some additional fields like IP address and customer segment.
         transaction = {
             "tx_id": self.fake.uuid4()[:12],
             "timestamp": timestamp,
@@ -205,13 +229,15 @@ class TransactionSimulator:
             "_previous_tx_time": previous_tx_time,
         }
 
+        # 7. Optionally inject legitimate-but-anomalous behavior to prevent the model from learning trivial fraud signals.
         self._maybe_inject_legit_anomaly(transaction, profile)
         return transaction
 
     def _maybe_inject_legit_anomaly(
         self, transaction: dict[str, object], profile: UserProfile
     ) -> None:
-        """OVERLAP: give some legitimate transactions fraud-shaped tells.
+        """
+        OVERLAP: give some legitimate transactions fraud-shaped tells.
 
         A model trained on data where "new device" or "big purchase" only
         ever appears on fraud rows will learn those as free discriminators.
@@ -376,10 +402,6 @@ class TransactionSimulator:
 
         return transaction
 
-    def _output_path(self) -> Path:
-        directory = create_dir(self.output_dir)
-        return directory / f"simulated_transactions_seed_{self.seed}.csv"
-
     def _transaction_columns(self) -> list[str]:
         """
         Define the column order for the output CSV. This ensures consistent ordering regardless of how dictionaries are iterated or how DataFrames are constructed.
@@ -406,36 +428,28 @@ class TransactionSimulator:
             "is_fraud",
         ]
 
-    def _transaction_rows(self, n_tx: int = 1_000_000) :
+    def _transaction_rows(self, n_tx: int = 1_000_000):
         """
         Generate transaction rows as dictionaries, yielding one at a time to avoid
         holding the entire dataset in memory. This is useful for generating very large datasets without running out of memory.
         """
 
         for _ in range(n_tx):
+            # 1. Randomly select a user profile from the pre-generated profiles.
             profile = self.profiles[self.rng.choice(list(self.profiles))]
+
+            # 2. Generate a normal transaction for the selected user profile.
             transaction = self._generate_normal_transaction(profile)
+
+            # 3. Replace with fraud pattern if applicable, and update the user's last transaction time.
             transaction = self._apply_fraud_pattern(transaction, profile)
+
+            # 4. Update the profile's last transaction time to the current transaction's timestamp, ensuring that subsequent transactions for this user are generated with the correct temporal context.
             profile.last_tx_time = transaction["timestamp"]
             # Drop internal bookkeeping field before this row is exposed
             # to callers/CSV output.
             del transaction["_previous_tx_time"]
             yield transaction
-
-    def generate(self, n_tx: int = 10_000) -> pd.DataFrame:
-        """
-        Generate a DataFrame of synthetic transactions.
-        """
-        if n_tx <= 0:
-            raise ValueError("n_tx must be a positive integer")
-        
-        if n_tx > 100_000:
-            logger.warning(
-                "Generating a very large number of transactions (%d). "
-                "This may take a while and consume significant memory.",
-                n_tx,
-            )
-        return pd.DataFrame(self._transaction_rows(n_tx))
 
     def save(
         self, transactions: pd.DataFrame | list[dict[str, object]] | object
@@ -443,8 +457,9 @@ class TransactionSimulator:
         """
         Save the generated transactions to a CSV file.
         """
-
-        output_path = self._output_path()
+        
+        create_dir(self.output_dir)
+        output_path = self.output_dir / self.output_file_name
 
         # If the transactions are already a DataFrame, use its built-in CSV writer.
         if isinstance(transactions, pd.DataFrame):
@@ -455,6 +470,8 @@ class TransactionSimulator:
         else:
             rows_written = 0
             fieldnames = self._transaction_columns()
+
+            # Write the transactions to the CSV file using DictWriter, ensuring consistent column order and handling any missing keys by writing empty strings.
             with output_path.open("w", newline="", encoding="utf-8") as stream:
                 writer = csv.DictWriter(stream, fieldnames=fieldnames)
                 writer.writeheader()
@@ -470,53 +487,43 @@ class TransactionSimulator:
         )
         return output_path
 
-    def generate_transactions_data(
-        self,
-        n_tx: int = 1_000_000,
-    ) -> Path:
+    def generate_transactions_data(self) -> Path:
         """
         Generate simulated transaction data and save it to a CSV file.
         """
 
-        return self.save(self._transaction_rows(n_tx))
+        return self.save(self._transaction_rows(n_tx=self.n_tx))
 
 
-def generate_transactions_data(
+def simulate_transactions_data(
     n_tx: int = 1_000_000,
     n_users: int = 5_000,
     seed: int = 42,
-    output_dir: str | Path | None = None,
+    fraud_rate: float = 0.015,
+    signal_noise_rate: float = 0.15,
+    legit_anomaly_rate: float = 0.04,
+    stealthy_fraud_share: float = 0.30,
+    params_path: Path = PARAMS_CONFIG_PATH,
+    output_dir: Path | None = None,
 ) -> Path:
     """
-    Generate synthetic transactions and save them under `data/simulated` directory.
+    Generate simulated transactions and save them to a CSV file.
     """
 
     simulator = TransactionSimulator(
+        output_dir=output_dir if output_dir is not None else SIMULATED_DATA_DIR,
+        n_tx=n_tx,
         n_users=n_users,
         seed=seed,
-        output_dir=output_dir,
+        fraud_rate=fraud_rate,
+        signal_noise_rate=signal_noise_rate,
+        legit_anomaly_rate=legit_anomaly_rate,
+        stealthy_fraud_share=stealthy_fraud_share,
+        params_path=params_path,
     )
-    return simulator.generate_transactions_data(n_tx=n_tx)
+    return simulator.generate_transactions_data()
 
-def load_params(path: str | Path = Path("configs/params.yaml")) -> dict[str, object]:
-    """
-    Load parameters from a YAML file.
-    """
 
-    ROOT_DIR = Path(__file__).parents[2]
-    path = ROOT_DIR / path
-
-    with open(path, "r", encoding="utf-8") as f:
-        params = yaml.safe_load(f)
-
-    return params
 if __name__ == "__main__":
-
-    params = load_params()["data_ingestion"]
-    
-    generate_transactions_data(
-        n_tx=params["n_tx"], 
-        n_users=params["n_users"], 
-        seed=params["seed"],
-    )
-    
+    transaction_simulator = TransactionSimulator()
+    transaction_simulator.generate_transactions_data()

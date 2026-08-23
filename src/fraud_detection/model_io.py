@@ -1,4 +1,6 @@
-"""Model loading, prediction, and threshold helpers."""
+"""
+Model loading, prediction, and threshold helpers.
+"""
 
 import json
 import logging
@@ -42,7 +44,7 @@ class ModelIO:
         except Exception as xgboost_error:
             raise RuntimeError(
                 f"Could not load model from {model_path}. "
-                f"Joblib failed with: {joblib_error}"
+                f"Joblib failed with: {xgboost_error}"
             ) from xgboost_error
 
     @staticmethod
@@ -63,7 +65,11 @@ class ModelIO:
                 else None
             )
             return np.asarray(
-                model.predict(xgb.DMatrix(features, feature_names=feature_names)),
+                model.predict(
+                    xgb.DMatrix(
+                        features, feature_names=feature_names
+                    )
+                ),
                 dtype=float,
             )
 
@@ -123,9 +129,10 @@ class ModelIO:
         """
         Save data to a JSON file.
         """
-
-        with Path(path).open("w", encoding="utf-8") as file:
-            json.dump(data, file, indent=2)
+        data_path = Path(path)
+        
+        with data_path.open("w", encoding="utf-8") as file:
+            json.dump(data, file, indent=4)
 
 
 def load_model(model_path: str | Path) -> Any:

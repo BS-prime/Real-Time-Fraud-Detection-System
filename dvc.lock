@@ -5,16 +5,16 @@ stages:
     deps:
     - path: src/fraud_detection/data_ingestion.py
       hash: md5
-      md5: 2a4e5f2fd8e238177b073948be1cfb21
-      size: 20961
+      md5: 339abb71dcb7a94a52167229fdd86dc9
+      size: 22189
     - path: src/fraud_detection/feature_schema.py
       hash: md5
-      md5: e468e4c9cb92ffa6c9d2126614d3173c
-      size: 618
+      md5: f412ca40d8987fa7956edcdd23dff11c
+      size: 1014
     - path: src/fraud_detection/paths.py
       hash: md5
-      md5: ee61b93bb30def186c6af411c80e3c07
-      size: 1204
+      md5: 7dea6fffad469c03f645ac3124595f4e
+      size: 1652
     params:
       configs/params.yaml:
         data_ingestion.n_tx: 1000000
@@ -23,23 +23,23 @@ stages:
     outs:
     - path: data/simulated/simulated_transactions_seed_42.csv
       hash: md5
-      md5: c692d9e001169a279d91664098b8e497
-      size: 174020358
+      md5: cc2088e0b6fbd5c4102541b9b9643464
+      size: 180020358
   feature_engineering:
     cmd: uv run src/fraud_detection/feature_engineering.py
     deps:
     - path: data/simulated/simulated_transactions_seed_42.csv
       hash: md5
-      md5: c692d9e001169a279d91664098b8e497
-      size: 174020358
+      md5: cc2088e0b6fbd5c4102541b9b9643464
+      size: 180020358
     - path: src/fraud_detection/feature_engineering.py
       hash: md5
-      md5: 9eda138e2b6b3d4fb2856fc115cc9eaf
-      size: 14318
+      md5: 8cbe28e9866218a7a2c476b697dbc323
+      size: 15481
     - path: src/fraud_detection/feature_schema.py
       hash: md5
-      md5: e468e4c9cb92ffa6c9d2126614d3173c
-      size: 618
+      md5: f412ca40d8987fa7956edcdd23dff11c
+      size: 1014
     - path: src/fraud_detection/geo.py
       hash: md5
       md5: d8678cb296e673cf070d9247aa1f0799
@@ -50,10 +50,20 @@ stages:
       size: 548
     - path: src/fraud_detection/paths.py
       hash: md5
-      md5: ee61b93bb30def186c6af411c80e3c07
-      size: 1204
+      md5: 7dea6fffad469c03f645ac3124595f4e
+      size: 1652
+    params:
+      configs/params.yaml:
+        data_ingestion.seed: 42
+        feature_engineering.min_hours_between_tx: 0.001
+        feature_engineering.rolling_window: 24h
+        feature_engineering.test_size: 0.2
     outs:
-    - path: data/features/fraud_features_seed_42.csv
+    - path: data/features/fraud_features_test_seed_42.csv
       hash: md5
-      md5: b347b38520bdd185225e725d2b7ed563
-      size: 125842868
+      md5: 48660f4d42f8a17ffc8181d4f99abfdd
+      size: 144208829
+    - path: data/features/fraud_features_train_seed_42.csv
+      hash: md5
+      md5: 9eac5bc4f48c03dbf2f1781386478039
+      size: 24617454
