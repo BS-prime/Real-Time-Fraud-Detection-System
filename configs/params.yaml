@@ -1,8 +1,7 @@
-
 data_ingestion:
   seed: 42 # !!! should be the same as feature_engineering.seed and model_training.seed
-  n_users: 5000
-  n_tx: 1000000
+  n_users: 500
+  n_tx: 10000
   fraud_rate: 0.015
   signal_noise_rate: 0.15  # see _apply_signal() docstring
   legit_anomaly_rate: 0.04  # see _maybe_inject_legit_anomaly() docstring
@@ -19,4 +18,19 @@ model_training:
   seed: 42 # !!! should be the same as data_ingestion.seed and feature_engineering.seed
   cv_folds: 3
   random_state: 42
-  scoring: "pr_auc"
+  scoring: "recall"
+
+threshold_optimization:
+  seed: 42
+  cost_fp: 1.0
+  cost_fn: 10.0
+
+model_evaluation:
+  seed: 42
+
+mlflow:
+  experiment_name: fraud-detection
+  tracking_uri: null
+  register_best_by: min_cost
+  model_registry_name: fraud-detection-model
+  enabled: true

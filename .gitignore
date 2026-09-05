@@ -39,10 +39,14 @@ env/
 # Project-generated outputs
 data/simulated/
 data/features/
-artifacts/models/
+artifacts/models/*
 artifacts/model_thresholds/
 artifacts/model_paths
 reports/model_evaluation/
 reports/drift_monitoring/
 reports/shap/
+
+# MLflow
+mlruns/
+artifacts/mlflow/
 

@@ -41,14 +41,54 @@ stages:
     deps:
       - src/fraud_detection/naming.py
       - src/fraud_detection/paths.py
+      - src/fraud_detection/mlflow_tracking.py
+      - src/fraud_detection/model_io.py
       - data/features/fraud_features_train_seed_${data_ingestion.seed}.csv
       - data/features/fraud_features_test_seed_${data_ingestion.seed}.csv
       - src/fraud_detection/model_training.py
     params:
       - configs/params.yaml:
           - data_ingestion.seed
+          - mlflow
       - configs/hyperparams.yaml:
           - models
     outs:
-      - artifacts/models/
-      
+      - artifacts/model_paths/model_paths_${data_ingestion.seed}.json
+  
+  threshold_optimization:
+    cmd: uv run src/fraud_detection/threshold_optimization.py
+    deps:
+      - src/fraud_detection/threshold_optimization.py
+      - src/fraud_detection/mlflow_tracking.py
+      - src/fraud_detection/model_io.py
+      - src/fraud_detection/feature_schema.py
+      - src/fraud_detection/paths.py
+      - artifacts/model_paths/model_paths_${data_ingestion.seed}.json
+      - data/features/fraud_features_test_seed_${data_ingestion.seed}.csv
+    params:
+      - configs/params.yaml:
+          - data_ingestion.seed
+          - threshold_optimization.cost_fp
+          - threshold_optimization.cost_fn
+          - mlflow
+    outs:
+      - artifacts/model_thresholds/threshold_summary_${data_ingestion.seed}.json
+
+  model_evaluation:
+    cmd: uv run src/fraud_detection/model_evaluation.py
+    deps:
+      - src/fraud_detection/model_evaluation.py
+      - src/fraud_detection/threshold_optimization.py
+      - src/fraud_detection/mlflow_tracking.py
+      - src/fraud_detection/model_io.py
+      - src/fraud_detection/feature_schema.py
+      - src/fraud_detection/paths.py
+      - artifacts/model_paths/model_paths_${data_ingestion.seed}.json
+      - artifacts/model_thresholds/threshold_summary_${data_ingestion.seed}.json
+      - data/features/fraud_features_test_seed_${data_ingestion.seed}.csv
+    params:
+      - configs/params.yaml:
+          - data_ingestion.seed
+          - mlflow
+    outs:
+      - reports/model_evaluation/evaluation_summary_${data_ingestion.seed}.json

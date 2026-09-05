@@ -18,10 +18,14 @@ import yaml
 from sklearn.model_selection import GridSearchCV, StratifiedKFold
 
 from fraud_detection.feature_schema import TARGET_COLUMN
+from fraud_detection.mlflow_tracking import (
+    log_training_failure,
+    log_training_run,
+    pipeline_run,
+    start_model_run,
+)
 from fraud_detection.model_io import ModelIO
-from fraud_detection.naming import seed_from_filename
 from fraud_detection.paths import (
-    FEATURE_DATA_DIR,
     HYPERPARAMS_CONFIG_PATH,
     MODEL_DIR,
     PARAMS_CONFIG_PATH,
@@ -109,17 +113,14 @@ def _resolve_model_class(model_type: str) -> type:
 
 class ModelTrainer:
     """
-    Train fraud detection models using configured hyperparameters.
-
-    params:
-    train_file_path: enter the csv path name.
+    Train fraud detection models using configured hyperparameters in YAML file.
     """
 
     def __init__(
         self,
+        train_file_path: Path | None = None,
         hyperparams_config_path: Path = HYPERPARAMS_CONFIG_PATH,
         params_config_path: Path = PARAMS_CONFIG_PATH,
-        train_file_path: Path | None = None,
         model_dir: Path = MODEL_DIR,
     ) -> None:
         self.hyperparams_config_path = hyperparams_config_path
@@ -128,7 +129,9 @@ class ModelTrainer:
         self.params_config = self._load_params_config()
         self.hyperparams_config = self._load_hyperparams_config()
         self.seed = self.params_config["seed"]
-        self.train_file_path = train_feature_file_path(seed=self.seed) or train_file_path
+        self.train_file_path = train_file_path or train_feature_file_path(
+            seed=self.seed
+        )
         self._validate_algo_names()
 
     def _load_hyperparams_config(self) -> dict[str, Any]:
@@ -183,25 +186,28 @@ class ModelTrainer:
                 "'RandomForest', 'xgboost_v2')."
             )
 
-    def _load_training_data(self) -> pd.DataFrame:
+    def _load_training_data(self, csv_path: Path | None = None) -> pd.DataFrame:
         """
         Load engineered feature data for model training.
         """
-        csv_path = self.train_file_path
+
+        csv_path: Path = csv_path or self.train_file_path
 
         if not csv_path.exists():
             raise FileNotFoundError(f"Feature file not found: {csv_path}")
 
         return pd.read_csv(csv_path)
 
-    def _split_features_and_target(self, df: pd.DataFrame)-> tuple[pd.DataFrame, pd.Series]:
+    @staticmethod
+    def _split_features_and_target(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.Series]:
         """
         Separate feature columns from the target label column.
         """
 
         return df.drop(columns=[TARGET_COLUMN]), df[TARGET_COLUMN]
 
-    def _build_estimator(self, model_type: str, seed: int) -> Any:
+    @staticmethod
+    def _build_estimator(model_type: str, seed: int) -> Any:
         """
         Build an estimator of the specified type, passing the random seed if supported.
         """
@@ -210,6 +216,7 @@ class ModelTrainer:
         constructor_params = inspect.signature(model_class.__init__).parameters
         if "random_state" in constructor_params:
             return model_class(random_state=seed)
+
         logger.debug(
             "%s has no random_state parameter; constructing without one.",
             model_type,
@@ -217,10 +224,16 @@ class ModelTrainer:
         return model_class()
 
     @staticmethod
-    def _save_trained_model(model: Any, model_path: Path) -> Path:
+    def _save_trained_model(model: Any, model_path: Path | str) -> Path:
         """
         Save the trained model to disk, choosing the appropriate serialization format.
         """
+
+        if not isinstance(model_path, Path):
+            model_path = Path(model_path)
+
+        if not model_path.exists():
+            create_dir(model_path)
 
         if hasattr(model, "save_model"):
             resolved_path = model_path.with_suffix(".json")
@@ -228,6 +241,7 @@ class ModelTrainer:
         else:
             resolved_path = model_path.with_suffix(".joblib")
             joblib.dump(model, resolved_path)
+
         return resolved_path
 
     @staticmethod
@@ -260,14 +274,24 @@ class ModelTrainer:
             if settings.get("enabled", True)
         ]
 
-    def train(self, algo_name: str = "XGBoost") -> Path:
+    def train(self, algo_name: str = "XGBoost", csv_path: Path | None = None) -> Path:
         """
         Train one desired model and save it in the directory.
         """
 
+        model_path, _ = self._train_model(algo_name=algo_name, csv_path=csv_path)
+        return model_path
+
+    def _train_model(
+        self, algo_name: str = "XGBoost", csv_path: Path | None = None
+    ) -> tuple[Path, GridSearchCV]:
+        """
+        Train one model and return the saved path plus the fitted GridSearchCV.
+        """
+
         # 1. Load the feature data and split into features and target.
         seed = self.params_config["seed"]
-        df = self._load_training_data()
+        df = self._load_training_data(csv_path=csv_path)
         features, target = self._split_features_and_target(df)
 
         # 2. Validate the requested algorithm is supported
@@ -291,8 +315,7 @@ class ModelTrainer:
         # 4. Perform a grid search over the hyperparameter in the yaml file
         cv_splitter = StratifiedKFold(
             n_splits=self.params_config["cv_folds"],
-            shuffle=True,
-            random_state=seed,
+            shuffle=False,
         )
         param_grid = self._degrid_estimator_parallelism(settings["params"])
 
@@ -307,12 +330,16 @@ class ModelTrainer:
             scoring=self.params_config["scoring"],
             cv=cv_splitter,
             n_jobs=-1,
+            verbose=3,
         )
         grid_search.fit(features, target)
 
-        # 6. Save the best model to the artifacts directory.
+        # 6. Save the best model to the `artifacts directory.
         output_dir = create_dir(self.model_dir)
-        model_path = output_dir / f"{algo_name}_seed_{seed}" or f"{algo_name}_{self.train_file_path.name}"
+        model_path = (
+            output_dir / f"{algo_name}_seed_{seed}"
+            or f"{algo_name}_{self.train_file_path.name}"
+        )
         model_path = self._save_trained_model(
             model=grid_search.best_estimator_, model_path=model_path
         )
@@ -325,11 +352,12 @@ class ModelTrainer:
             output_dir,
         )
 
-        return model_path
+        return model_path, grid_search
 
     def train_all(
         self,
         stop_on_error: bool = False,
+        csv_path: Path | None = None,
     ) -> dict[str, Path | str | Exception]:
         """
         Train every model in the config with `enabled: true` (the default).
@@ -349,44 +377,72 @@ class ModelTrainer:
 
         results: dict[str, Path | str | Exception] = {}
 
-        # Train each enabled model, catching exceptions to allow other models to continue training.
-        for algo_name in algo_names:
-            logger.info("=== Training '%s' ===", algo_name)
-            try:
-                model_path = self.train(algo_name=algo_name)
-                results[algo_name] = model_path
+        pipeline_params = {
+            "seed": self.seed,
+            "cv_folds": self.params_config["cv_folds"],
+            "scoring": self.params_config["scoring"],
+        }
 
-            except Exception as exc:
-                if stop_on_error:
-                    raise
-                logger.error("Training failed for '%s': %s", algo_name, exc)
-                results[algo_name] = exc
+        with pipeline_run(seed=self.seed, params=pipeline_params) as run_context:
+            if run_context is not None:
+                import mlflow
 
-        # saved the paths to a json file which will be used later during model evaluation phase to load models.
+                mlflow.log_artifact(str(self.hyperparams_config_path))
+
+            for algo_name in algo_names:
+                logger.info("=== Training '%s' ===", algo_name)
+                with start_model_run(
+                    algo_name, run_context, stage="training"
+                ) as run_id:
+                    try:
+                        model_path, grid_search = self._train_model(
+                            algo_name=algo_name, csv_path=csv_path
+                        )
+                        results[algo_name] = str(model_path)
+
+                        log_training_run(
+                            model=grid_search.best_estimator_,
+                            algo_name=algo_name,
+                            cv_best_score=float(grid_search.best_score_),
+                            best_params=grid_search.best_params_,
+                            scoring=self.params_config["scoring"],
+                            seed=self.seed,
+                            context=run_context,
+                            run_id=run_id,
+                        )
+
+                    except Exception as exc:
+                        if stop_on_error:
+                            raise
+                        logger.error("Training failed for '%s': %s", algo_name, exc)
+                        log_training_failure(str(exc))
+                        results[algo_name] = str(exc)
+
+        # saved the paths in a json file, to be used later during threshold optimization or model evaluation phase to load models.
         create_dir(SAVED_MODELS_PATH)
-        ModelIO.save_json(data=results,         path=SAVED_MODELS_PATH / f"model_paths_{self.seed}.json")
+        ModelIO.save_json(
+            data=results, path=SAVED_MODELS_PATH / f"model_paths_{self.seed}.json"
+        )
 
         return results
 
 
-def model_trainer(
-    csv_name: str = "fraud_features_seed_42.csv", algo_name: str = "xgboost"
-) -> Path:
+def model_trainer(csv_path: Path, algo_name: str = "xgboost") -> Path:
     """
     Train a single model and return the path of the saved model.
     """
 
-    return ModelTrainer().train(algo_name=algo_name)
+    return ModelTrainer().train(algo_name=algo_name, csv_path=csv_path)
 
 
 def train_all_models(
-    csv_name: str = "fraud_features_seed_42.csv", stop_on_error: bool = False
+    csv_path: Path, stop_on_error: bool = False
 ) -> dict[str, Path | str | Exception]:
     """
-    Train all enabled models from the yaml file and return
+    Train all enabled models from the YAML file and return
     """
 
-    return ModelTrainer().train_all(stop_on_error=stop_on_error)
+    return ModelTrainer().train_all(csv_path=csv_path, stop_on_error=stop_on_error)
 
 
 if __name__ == "__main__":

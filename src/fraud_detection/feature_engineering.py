@@ -5,20 +5,6 @@ This module converts raw transaction logs into a model-ready feature
 matrix. It is used both for training (where the target label is
 present) and for batch/online inference (where it is not), so the
 target column is treated as optional throughout.
-
-Design notes
-------------
-- All transformations are pure functions of the input DataFrame; the
-  class holds only configuration, so instances are cheap, stateless,
-  and safe to share across threads.
-- Every step that can fail on malformed input (missing columns, bad
-  dtypes, out-of-order timestamps, unknown categories) fails loudly
-  with a specific exception rather than silently producing NaNs or
-  zeros, because silent zero-filling of a fraud feature is a
-  correctness bug, not a convenience.
-- Writing output is atomic (write to a temp file, then rename) so a
-  crash mid-write can never leave a corrupt/partial feature file on
-  disk for a downstream training job to pick up.
 """
 
 from __future__ import annotations
@@ -32,6 +18,8 @@ from typing import Any
 import numpy as np
 import pandas as pd
 import yaml
+from pandas import DataFrame
+from pandas.io.parsers import TextFileReader
 
 from fraud_detection.feature_schema import (
     AUTH_METHODS,
@@ -107,18 +95,18 @@ class FeatureEngineer:
     """
 
     def __init__(
-        self,
-        params_config_path: Path = PARAMS_CONFIG_PATH,
-        csv_path: Path = SIMULATED_DATA_DIR / "simulated_transactions_seed_42.csv",
-        train_output_path: Path = FEATURE_DATA_DIR / "fraud_features_train_seed_42.csv",
-        test_output_path: Path = FEATURE_DATA_DIR / "fraud_features_test_seed_42.csv",
+            self,
+            params_config_path: Path = PARAMS_CONFIG_PATH,
+            csv_path: Path = SIMULATED_DATA_DIR / "simulated_transactions_seed_42.csv",
+            train_output_path: Path = FEATURE_DATA_DIR / "fraud_features_train_seed_42.csv",
+            test_output_path: Path = FEATURE_DATA_DIR / "fraud_features_test_seed_42.csv",
     ) -> None:
         self.params_config_path = params_config_path
         self.params_config = self._load_params_config()
         self.seed = self.params_config.get("seed", 42)
-        self.csv_path = simulated_transactions_path(self.seed) or csv_path
-        self.train_output_path = train_feature_file_path(self.seed) or train_output_path
-        self.test_output_path = test_feature_file_path(self.seed) or test_output_path
+        self.csv_path = csv_path or simulated_transactions_path(self.seed)
+        self.train_output_path = train_output_path or train_feature_file_path(self.seed)
+        self.test_output_path = test_output_path or test_feature_file_path(self.seed)
 
     def _load_params_config(self) -> dict[str, Any]:
         """
@@ -138,7 +126,7 @@ class FeatureEngineer:
         Load a raw transaction CSV from the simulated data directory and validate that it contains the required columns. Returns a DataFrame of the raw transactions.
         """
 
-        csv_path = self.csv_path
+        csv_path = csv_path or self.csv_path
         if not csv_path.exists():
             raise FileNotFoundError(f"Transaction file not found: {csv_path}")
 
@@ -148,7 +136,7 @@ class FeatureEngineer:
         return df
 
     def train_test_split(
-        self, features: pd.DataFrame
+            self, features: pd.DataFrame
     ) -> tuple[pd.DataFrame, pd.DataFrame]:
         """
         Split the feature DataFrame into training and testing sets based on the configured test size.
@@ -166,11 +154,12 @@ class FeatureEngineer:
         # Split based on time ordering to avoid data leakage from future transactions into the training set.
         features = features.sort_values(["timestamp", "user_id"]).reset_index(drop=True)
         train_df = features[: int(index)]
-        test_df = features[int(index) :]
+        test_df = features[int(index):]
 
         return train_df, test_df
 
-    def save_features(self, features: pd.DataFrame, file_path: Path) -> None:
+    @staticmethod
+    def save_features(features: pd.DataFrame, file_path: Path) -> None:
         """
         Save the engineered feature matrix to a CSV in the feature data directory.
         """
@@ -209,7 +198,7 @@ class FeatureEngineer:
         df = self._add_calendar_features(df)
         df = self._add_spend_features(df)
         df = self._add_geo_velocity_features(df)
-        df = self._encode_categoricals(df)
+        df = self._encode_categorical(df)
         df = df.drop(columns=[c for c in NON_MODEL_COLUMNS if c in df.columns])
         df = self._align_to_feature_schema(df)
 
@@ -228,8 +217,8 @@ class FeatureEngineer:
             raise SchemaValidationError(f"Missing required column(s): {missing}")
 
         if (
-            self.params_config.get("require_target")
-            and self.params_config.get("target_column") not in transactions.columns
+                self.params_config.get("require_target")
+                and self.params_config.get("target_column") not in transactions.columns
         ):
             raise SchemaValidationError(
                 f"Target column '{self.params_config.get('target_column')}' is required but absent. "
@@ -242,7 +231,8 @@ class FeatureEngineer:
                 f"Found {dup_count} duplicate tx_id value(s); each transaction must be unique"
             )
 
-    def _prepare_time_ordering(self, df: pd.DataFrame) -> pd.DataFrame:
+    @staticmethod
+    def _prepare_time_ordering(df: pd.DataFrame) -> pd.DataFrame:
         """
         Prepare the DataFrame for time-based operations by ensuring the timestamp column is properly formatted.
         """
@@ -263,22 +253,27 @@ class FeatureEngineer:
 
     def _add_calendar_features(self, df: pd.DataFrame) -> pd.DataFrame:
         """
-        add calendar-based features such as hour of day, day of week, and transaction count in the last 24 hours for each user.
+        Add calendar-based features such as hour of day, day of week, and transaction count in the last 24 hours for each user.
         """
 
+        # 1. create new time-series features
         df["hour"] = df["timestamp"].dt.hour
         df["day_of_week"] = df["timestamp"].dt.dayofweek
+
+        # 2. calculate 24-hour rolling window transaction count per user
         df["tx_count_24h"] = (
             df.groupby("user_id")
-            .rolling(self.params_config.get("rolling_window"), on="timestamp")["tx_id"]
+            .rolling(self.params_config.get("rolling_window", "24h"), on="timestamp")["tx_id"]
             .count()
             .values
         )
         return df
 
-    def _add_spend_features(self, df: pd.DataFrame) -> pd.DataFrame:
+    @staticmethod
+    def _add_spend_features(df: pd.DataFrame) -> pd.DataFrame:
         """
-        Add features related to transaction amounts, including the average spend of the user and the ratio of the current amount to the average spend."""
+        Add features related to transaction amounts, including the average spend of the user and the ratio of the current amount to the average spend.
+        """
 
         if (df["amount"] < 0).any():
             n_negative = int((df["amount"] < 0).sum())
@@ -304,6 +299,7 @@ class FeatureEngineer:
         """
         Add geographical and velocity-based features.
         """
+
         df["prev_lat"] = df.groupby("user_id")["lat"].shift(1)
         df["prev_lon"] = df.groupby("user_id")["lon"].shift(1)
         df["prev_ts"] = df.groupby("user_id")["timestamp"].shift(1)
@@ -327,18 +323,20 @@ class FeatureEngineer:
         )
 
         df["travel_velocity_kmph"] = (
-            df["dist_from_last_tx_km"] / hours_since_previous
+                df["dist_from_last_tx_km"] / hours_since_previous
         ).fillna(0.0)
 
         return df
 
-    def _encode_categoricals(self, df: pd.DataFrame) -> pd.DataFrame:
+    @staticmethod
+    def _encode_categorical(df: pd.DataFrame) -> pd.DataFrame:
         """
         Encode categorical features as one-hot (dummy) variables. Warn if any unknown categories are present, and treat them as all-zero dummies.
         """
+
         for column, known_values in (
-            ("auth_method", AUTH_METHODS),
-            ("category", CATEGORIES),
+                ("auth_method", AUTH_METHODS),
+                ("category", CATEGORIES),
         ):
             unknown = set(df[column].dropna().unique()) - set(known_values)
             if unknown:
@@ -355,9 +353,10 @@ class FeatureEngineer:
             df, columns=["auth_method", "category"], drop_first=True, dtype=int
         )
 
-    def _align_to_feature_schema(self, df: pd.DataFrame) -> pd.DataFrame:
+    @staticmethod
+    def _align_to_feature_schema(df: pd.DataFrame) -> pd.DataFrame:
         """
-        Ensure that the DataFrame contains all expected feature columns, filling missing ones with zeros. Also fill any remaining NaNs in numeric columns with zeros. Finally, return only the columns that are part of the model schema, optionally including the target column.
+        Ensure that the DataFrame contains all expected feature columns, filling missing ones with zeros. Also fill any remaining Nans in numeric columns with zeros. Finally, return only the columns that are part of the model schema, optionally including the target column.
         """
 
         for column in FEATURE_COLUMNS:
@@ -372,15 +371,15 @@ class FeatureEngineer:
         return df[output_columns]
 
     def feature_engineer(
-        self, csv_path: Path = SIMULATED_DATA_DIR / "simulated_transactions_seed_42.csv"
-    ) -> tuple(Path, Path):
+            self, csv_path: Path = SIMULATED_DATA_DIR / "simulated_transactions_seed_42.csv"
+    ) -> tuple[Path, Path]:
         """
         Load, engineer, and persist features for a single raw CSV.
         """
 
         transactions = self.load_transactions(csv_path)
         train_df, test_df = self.train_test_split(transactions)
-        train_df  = self.engineer_transaction_features(train_df)
+        train_df = self.engineer_transaction_features(train_df)
         self.save_features(train_df, self.train_output_path)
         self.save_features(test_df, self.test_output_path)
         return self.train_output_path, self.test_output_path
@@ -389,10 +388,11 @@ class FeatureEngineer:
 # FEATURE ENGINEERING API FUNCTIONS
 
 
-def load_transactions(csv_path: Path) -> pd.DataFrame:
+def load_transactions(csv_path: Path) -> TextFileReader | DataFrame:
     """
     Validate and load a raw transaction CSV from the simulated data directory. Returns a DataFrame of the raw transactions.
     """
+
     return FeatureEngineer().load_transactions(csv_path)
 
 
@@ -400,15 +400,17 @@ def engineer_transaction_features(transactions: pd.DataFrame) -> pd.DataFrame:
     """
     Engineer features for a DataFrame of transactions.
     """
+
     return FeatureEngineer().engineer_transaction_features(transactions)
 
 
 def batch_feature_engineer(
-    csv_path: Path = SIMULATED_DATA_DIR / "simulated_transactions_seed_42.csv",
-) -> pd.DataFrame:
+        csv_path: Path = SIMULATED_DATA_DIR / "simulated_transactions_seed_42.csv",
+) -> tuple[Path, Path]:
     """
     Perform feature engineer and save train and test as csv.
     """
+
     return FeatureEngineer().feature_engineer(csv_path)
 
 
