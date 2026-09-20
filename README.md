@@ -158,11 +158,11 @@ Note: the screenshot payload includes legacy smoke-test fields such as `device_i
 |   `-- config.yaml
 |-- data/
 |   |-- features/
-|   |   |-- fraud_features_seed_42.csv
-|   |   `-- fraud_features_seed_69.csv
+|   |   |-- fraud_features_train_seed_42.parquet
+|   |   `-- fraud_features_test_seed_42.parquet
 |   `-- simulated/
-|       |-- simulated_transactions_seed_42.csv
-|       `-- simulated_transactions_seed_69.csv
+|       |-- simulated_transactions_seed_42.parquet
+|       `-- simulated_transactions_seed_69.parquet
 |-- docs/
 |   `-- assets/
 |       `-- api-prediction-demo.png
@@ -369,8 +369,8 @@ The included XGBoost configuration uses imbalanced-learning settings such as `sc
 | `artifacts/models/random_forest_seed_42.json` | Alternative trained model artifact |
 | `artifacts/model_thresholds/optimal_threshold_xgboost_seed_42.json` | Cost-optimized XGBoost threshold |
 | `artifacts/model_thresholds/optimal_threshold_random_forest_seed_42.json` | Cost-optimized Random Forest threshold |
-| `data/simulated/*.csv` | Synthetic transaction data |
-| `data/features/*.csv` | Model-ready engineered features |
+| `data/simulated/*.parquet` | Synthetic transaction data |
+| `data/features/*.parquet` | Model-ready engineered features |
 | `reports/drift_report_20260201_071922.html` | Existing Evidently drift report |
 
 ## Run with Docker

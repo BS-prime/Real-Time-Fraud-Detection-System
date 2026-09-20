@@ -5,37 +5,37 @@ stages:
     deps:
     - path: src/fraud_detection/data_ingestion.py
       hash: md5
-      md5: 339abb71dcb7a94a52167229fdd86dc9
-      size: 22189
+      md5: bc7b1d5d6030ab96e54b7125ded518b4
+      size: 23540
     - path: src/fraud_detection/feature_schema.py
       hash: md5
       md5: f412ca40d8987fa7956edcdd23dff11c
       size: 1014
     - path: src/fraud_detection/paths.py
       hash: md5
-      md5: 7dea6fffad469c03f645ac3124595f4e
-      size: 1652
+      md5: 644bf8e967070e016b4c12b51f3e2d5e
+      size: 2613
     params:
       configs/params.yaml:
         data_ingestion.n_tx: 10000
         data_ingestion.n_users: 500
         data_ingestion.seed: 42
     outs:
-    - path: data/simulated/simulated_transactions_seed_42.csv
+    - path: data/simulated/simulated_transactions_seed_42.parquet
       hash: md5
-      md5: 69c8be17e6de1d2f5fb66db03e1fd886
-      size: 1780014
+      md5: ca16ea791b54a9569133977f7f1ab0cf
+      size: 663152
   feature_engineering:
     cmd: uv run src/fraud_detection/feature_engineering.py
     deps:
-    - path: data/simulated/simulated_transactions_seed_42.csv
+    - path: data/simulated/simulated_transactions_seed_42.parquet
       hash: md5
-      md5: 69c8be17e6de1d2f5fb66db03e1fd886
-      size: 1780014
+      md5: ca16ea791b54a9569133977f7f1ab0cf
+      size: 663152
     - path: src/fraud_detection/feature_engineering.py
       hash: md5
-      md5: 6d16b212d93f281b7e13c59765a8ea8c
-      size: 15148
+      md5: 8115c5f968b8c846c52c77229f27670d
+      size: 15035
     - path: src/fraud_detection/feature_schema.py
       hash: md5
       md5: f412ca40d8987fa7956edcdd23dff11c
@@ -50,8 +50,8 @@ stages:
       size: 548
     - path: src/fraud_detection/paths.py
       hash: md5
-      md5: 7dea6fffad469c03f645ac3124595f4e
-      size: 1652
+      md5: 644bf8e967070e016b4c12b51f3e2d5e
+      size: 2613
     params:
       configs/params.yaml:
         data_ingestion.seed: 42
@@ -59,37 +59,45 @@ stages:
         feature_engineering.rolling_window: 24h
         feature_engineering.test_size: 0.2
     outs:
-    - path: data/features/fraud_features_test_seed_42.csv
+    - path: data/features/fraud_features_test_seed_42.parquet
       hash: md5
-      md5: 8e277f9678f444f11815a64396ce12b3
-      size: 1424051
-    - path: data/features/fraud_features_train_seed_42.csv
+      md5: f620d1e6ed6fe84f45fd56ff3193ddaf
+      size: 525965
+    - path: data/features/fraud_features_train_seed_42.parquet
       hash: md5
-      md5: 762693fa1b0939970af108385de2e8e6
-      size: 232373
+      md5: 56b5d60c6a076c424d271907e2ee3215
+      size: 131603
   model_training:
     cmd: uv run src/fraud_detection/model_training.py
     deps:
-    - path: data/features/fraud_features_test_seed_42.csv
+    - path: data/features/fraud_features_test_seed_42.parquet
       hash: md5
-      md5: 8e277f9678f444f11815a64396ce12b3
-      size: 1424051
-    - path: data/features/fraud_features_train_seed_42.csv
+      md5: f620d1e6ed6fe84f45fd56ff3193ddaf
+      size: 525965
+    - path: data/features/fraud_features_train_seed_42.parquet
       hash: md5
-      md5: 762693fa1b0939970af108385de2e8e6
-      size: 232373
+      md5: 56b5d60c6a076c424d271907e2ee3215
+      size: 131603
+    - path: src/fraud_detection/mlflow_tracking.py
+      hash: md5
+      md5: 34ac4332c798cf12b26648714d103796
+      size: 18154
+    - path: src/fraud_detection/model_io.py
+      hash: md5
+      md5: e2e31edd115a06103a7b87f6de7d9ee9
+      size: 4981
     - path: src/fraud_detection/model_training.py
       hash: md5
-      md5: 6ca64d8f968cf19ea12611a634f5bc3a
-      size: 15757
+      md5: 80e966a814cf551cdfd3d9aca0b081bf
+      size: 17522
     - path: src/fraud_detection/naming.py
       hash: md5
       md5: e6bb256f0b575c8b4470c6ec9ea80a7e
       size: 548
     - path: src/fraud_detection/paths.py
       hash: md5
-      md5: 7dea6fffad469c03f645ac3124595f4e
-      size: 1652
+      md5: 644bf8e967070e016b4c12b51f3e2d5e
+      size: 2613
     params:
       configs/hyperparams.yaml:
         models:
@@ -109,6 +117,8 @@ stages:
               - liblinear
               class_weight:
               - balanced
+              - 0: 1
+                1: 999
               max_iter:
               - 1000
               n_jobs:
@@ -118,21 +128,28 @@ stages:
             enabled: true
             params:
               n_estimators:
+              - 300
               - 500
               - 1000
               - 1500
               class_weight:
               - balanced
               - balanced_subsample
+              - 0: 1
+                1: 999
               max_depth:
+              - 6
               - 10
               - 15
               min_samples_leaf:
+              - 5
               - 10
               - 15
+              - 20
               max_features:
               - sqrt
-              - log2
+              - 0.2
+              - 0.5
               bootstrap:
               - true
               n_jobs:
@@ -142,13 +159,19 @@ stages:
             enabled: true
             params:
               scale_pos_weight:
-              - 284.71
+              - 200
+              - 400
+              - 656
+              - 1000
+              - 1500
+              - 2000
               max_depth:
               - 3
               - 6
+              - 9
               min_child_weight:
+              - 5
               - 10
-              - 15
               gamma:
               - 1.5
               - 2.0
@@ -159,24 +182,24 @@ stages:
               - 0.5
               - 1.0
               subsample:
+              - 0.6
               - 0.7
               - 0.8
-              - 0.9
               colsample_bytree:
+              - 0.6
               - 0.8
-              learning_rate:
-              - 0.01
               n_estimators:
               - 500
               - 1000
               - 1500
-              tree_method:
-              - approx
-              - auto
-              - exact
-              - hist
       configs/params.yaml:
         data_ingestion.seed: 42
+        mlflow:
+          experiment_name: fraud-detection
+          tracking_uri:
+          register_best_by: min_cost
+          model_registry_name: fraud-detection-model
+          enabled: true
     outs:
     - path: artifacts/model_paths/model_paths_42.json
       hash: md5
@@ -184,3 +207,101 @@ stages:
       size: 372
   threshold_optimization:
     cmd: uv run src/fraud_detection/threshold_optimization.py
+    deps:
+    - path: artifacts/model_paths/model_paths_42.json
+      hash: md5
+      md5: ac5a23db284039789d5d27ec24cc6935
+      size: 372
+    - path: data/features/fraud_features_test_seed_42.parquet
+      hash: md5
+      md5: f620d1e6ed6fe84f45fd56ff3193ddaf
+      size: 525965
+    - path: src/fraud_detection/feature_schema.py
+      hash: md5
+      md5: f412ca40d8987fa7956edcdd23dff11c
+      size: 1014
+    - path: src/fraud_detection/mlflow_tracking.py
+      hash: md5
+      md5: 34ac4332c798cf12b26648714d103796
+      size: 18154
+    - path: src/fraud_detection/model_io.py
+      hash: md5
+      md5: e2e31edd115a06103a7b87f6de7d9ee9
+      size: 4981
+    - path: src/fraud_detection/paths.py
+      hash: md5
+      md5: 644bf8e967070e016b4c12b51f3e2d5e
+      size: 2613
+    - path: src/fraud_detection/threshold_optimization.py
+      hash: md5
+      md5: a0cc8f4601313d1c10a47712eb0380ae
+      size: 7605
+    params:
+      configs/params.yaml:
+        data_ingestion.seed: 42
+        mlflow:
+          experiment_name: fraud-detection
+          tracking_uri:
+          register_best_by: min_cost
+          model_registry_name: fraud-detection-model
+          enabled: true
+        threshold_optimization.cost_fn: 10.0
+        threshold_optimization.cost_fp: 1.0
+    outs:
+    - path: artifacts/model_thresholds/threshold_summary_42.json
+      hash: md5
+      md5: 0e2eec48d844b307a217607c66c96eba
+      size: 283
+  model_evaluation:
+    cmd: uv run src/fraud_detection/model_evaluation.py
+    deps:
+    - path: artifacts/model_paths/model_paths_42.json
+      hash: md5
+      md5: ac5a23db284039789d5d27ec24cc6935
+      size: 372
+    - path: artifacts/model_thresholds/threshold_summary_42.json
+      hash: md5
+      md5: 0e2eec48d844b307a217607c66c96eba
+      size: 283
+    - path: data/features/fraud_features_test_seed_42.parquet
+      hash: md5
+      md5: f620d1e6ed6fe84f45fd56ff3193ddaf
+      size: 525965
+    - path: src/fraud_detection/feature_schema.py
+      hash: md5
+      md5: f412ca40d8987fa7956edcdd23dff11c
+      size: 1014
+    - path: src/fraud_detection/mlflow_tracking.py
+      hash: md5
+      md5: 34ac4332c798cf12b26648714d103796
+      size: 18154
+    - path: src/fraud_detection/model_evaluation.py
+      hash: md5
+      md5: 46f93b98a3c726c7be02f24283266c7e
+      size: 11426
+    - path: src/fraud_detection/model_io.py
+      hash: md5
+      md5: e2e31edd115a06103a7b87f6de7d9ee9
+      size: 4981
+    - path: src/fraud_detection/paths.py
+      hash: md5
+      md5: 644bf8e967070e016b4c12b51f3e2d5e
+      size: 2613
+    - path: src/fraud_detection/threshold_optimization.py
+      hash: md5
+      md5: a0cc8f4601313d1c10a47712eb0380ae
+      size: 7605
+    params:
+      configs/params.yaml:
+        data_ingestion.seed: 42
+        mlflow:
+          experiment_name: fraud-detection
+          tracking_uri:
+          register_best_by: min_cost
+          model_registry_name: fraud-detection-model
+          enabled: true
+    outs:
+    - path: reports/model_evaluation/evaluation_summary_42.json
+      hash: md5
+      md5: 9bb72fe95021bc027cf791a63551bf5b
+      size: 687

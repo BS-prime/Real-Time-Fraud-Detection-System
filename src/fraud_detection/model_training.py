@@ -9,6 +9,7 @@ import importlib
 import inspect
 import logging
 import re
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -18,12 +19,7 @@ import yaml
 from sklearn.model_selection import GridSearchCV, StratifiedKFold
 
 from fraud_detection.feature_schema import TARGET_COLUMN
-from fraud_detection.mlflow_tracking import (
-    log_training_failure,
-    log_training_run,
-    pipeline_run,
-    start_model_run,
-)
+from fraud_detection.mlflow_tracking import MLflowTracker
 from fraud_detection.model_io import ModelIO
 from fraud_detection.paths import (
     HYPERPARAMS_CONFIG_PATH,
@@ -60,6 +56,26 @@ _ESTIMATOR_PARALLELISM_PARAMS = {"n_jobs"}
 
 # Valid model names must start with a letter and contain only letters, digits, underscores, and hyphens. This regex pattern is used to validate model names in the configuration file to ensure they are safe to use as filenames and identifiers.
 _VALID_ALGO_NAME_PATTERN = re.compile(r"^[A-Za-z][A-Za-z0-9_-]*$")
+
+
+@dataclass
+class TrainingResult:
+    """
+    Serializable result for one model training attempt.
+    """
+
+    algo_name: str
+    model_path: Path | None
+    best_score: float | None
+    best_params: dict[str, Any]
+    error: str | None = None
+
+    @property
+    def succeeded(self) -> bool:
+        return self.error is None and self.model_path is not None
+
+    def to_model_paths_value(self) -> str:
+        return str(self.model_path) if self.succeeded else str(self.error)
 
 
 def _resolve_model_class(model_type: str) -> type:
@@ -122,7 +138,7 @@ class ModelTrainer:
         hyperparams_config_path: Path = HYPERPARAMS_CONFIG_PATH,
         params_config_path: Path = PARAMS_CONFIG_PATH,
         model_dir: Path = MODEL_DIR,
-    ) -> None:
+        ) -> None:
         self.hyperparams_config_path = hyperparams_config_path
         self.param_path = params_config_path
         self.model_dir = model_dir
@@ -186,17 +202,17 @@ class ModelTrainer:
                 "'RandomForest', 'xgboost_v2')."
             )
 
-    def _load_training_data(self, csv_path: Path | None = None) -> pd.DataFrame:
+    def _load_training_data(self, feature_path: Path | None = None) -> pd.DataFrame:
         """
         Load engineered feature data for model training.
         """
 
-        csv_path: Path = csv_path or self.train_file_path
+        feature_path: Path = feature_path or self.train_file_path
 
-        if not csv_path.exists():
-            raise FileNotFoundError(f"Feature file not found: {csv_path}")
+        if not feature_path.exists():
+            raise FileNotFoundError(f"Feature file not found: {feature_path}")
 
-        return pd.read_csv(csv_path)
+        return pd.read_parquet(feature_path)
 
     @staticmethod
     def _split_features_and_target(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.Series]:
@@ -232,8 +248,7 @@ class ModelTrainer:
         if not isinstance(model_path, Path):
             model_path = Path(model_path)
 
-        if not model_path.exists():
-            create_dir(model_path)
+        create_dir(model_path.parent)
 
         if hasattr(model, "save_model"):
             resolved_path = model_path.with_suffix(".json")
@@ -247,8 +262,7 @@ class ModelTrainer:
     @staticmethod
     def _degrid_estimator_parallelism(params: dict[str, Any]) -> dict[str, Any]:
         """
-        Override any hyperparameter that requests internal parallelism (e.g. n_jobs)
-        to a single job, to avoid CPU oversubscription when GridSearchCV is also parallelizing across folds and candidates. This is a common source of performance degradation and confusing errors, so we enforce it here rather than relying on the user to remember to do it in config.
+        Override any hyperparameter that requests internal parallelism (e.g. n_jobs) to a single job, to avoid CPU oversubscription when GridSearchCV is also parallelizing across folds and candidates. This is a common source of performance degradation and confusing errors, so we enforce it here rather than relying on the user to remember to do it in config.
         """
 
         cleaned = dict(params)
@@ -274,45 +288,46 @@ class ModelTrainer:
             if settings.get("enabled", True)
         ]
 
-    def train(self, algo_name: str = "XGBoost", csv_path: Path | None = None) -> Path:
+    def train(self, algo_name: str = "XGBoost", feature_path: Path | None = None) -> Path:
         """
         Train one desired model and save it in the directory.
         """
 
-        model_path, _ = self._train_model(algo_name=algo_name, csv_path=csv_path)
-        return model_path
+        result, _ = self._fit_and_save_model(algo_name=algo_name, feature_path=feature_path)
+        if result.model_path is None:
+            raise RuntimeError(result.error or f"Training failed for {algo_name}")
+        return result.model_path
 
-    def _train_model(
-        self, algo_name: str = "XGBoost", csv_path: Path | None = None
-    ) -> tuple[Path, GridSearchCV]:
+    def train_one(
+        self, algo_name: str = "XGBoost", feature_path: Path | None = None
+        ) -> TrainingResult:
         """
-        Train one model and return the saved path plus the fitted GridSearchCV.
+        Train one model and return a structured, serializable result.
         """
 
-        # 1. Load the feature data and split into features and target.
+        result, _ = self._fit_and_save_model(algo_name=algo_name, feature_path=feature_path)
+        return result
+
+    def _fit_and_save_model(
+        self, algo_name: str = "XGBoost", feature_path: Path | None = None
+        ) -> tuple[TrainingResult, Any]:
+        """
+        Train one model and return its result plus the fitted estimator for logging.
+        """
+
         seed = self.params_config["seed"]
-        df = self._load_training_data(csv_path=csv_path)
+        df = self._load_training_data(feature_path=feature_path)
         features, target = self._split_features_and_target(df)
 
-        # 2. Validate the requested algorithm is supported
         if algo_name not in self.hyperparams_config["models"]:
             available = ", ".join(self.hyperparams_config["models"])
             raise ValueError(
                 f"Unknown algo_name '{algo_name}'. Available models: {available}"
             )
 
-        # 3. Build the estimator with the specified random seed.
-        settings = self.hyperparams_config["models"][
-            algo_name
-        ]  # output: {"type": "XGBClassifier", "params": {...}}
-        model_type = settings[
-            "type"
-        ]  # output: "XGBClassifier" or "RandomForestClassifier"
-        estimator = self._build_estimator(
-            model_type, seed
-        )  # output: RandomForestClassifier(random_state=seed) or XGBClassifier(random_state=seed)
+        settings = self.hyperparams_config["models"][algo_name]
+        estimator = self._build_estimator(settings["type"], seed)
 
-        # 4. Perform a grid search over the hyperparameter in the yaml file
         cv_splitter = StratifiedKFold(
             n_splits=self.params_config["cv_folds"],
             shuffle=False,
@@ -330,21 +345,16 @@ class ModelTrainer:
             scoring=self.params_config["scoring"],
             cv=cv_splitter,
             n_jobs=-1,
-            verbose=3,
+            verbose=2,
         )
         grid_search.fit(features, target)
 
-        # 6. Save the best model to the `artifacts directory.
         output_dir = create_dir(self.model_dir)
-        model_path = (
-            output_dir / f"{algo_name}_seed_{seed}"
-            or f"{algo_name}_{self.train_file_path.name}"
-        )
+        model_path = output_dir / f"{algo_name}_seed_{seed}"
         model_path = self._save_trained_model(
             model=grid_search.best_estimator_, model_path=model_path
         )
 
-        # 7. Log the best score and the path where the model was saved.
         logger.info(
             "Saved model %s with best score %.4f to %s",
             model_path.name,
@@ -352,13 +362,20 @@ class ModelTrainer:
             output_dir,
         )
 
-        return model_path, grid_search
+        result = TrainingResult(
+            algo_name=algo_name,
+            model_path=model_path,
+            best_score=float(grid_search.best_score_),
+            best_params=grid_search.best_params_,
+        )
+        return result, grid_search.best_estimator_
 
     def train_all(
         self,
         stop_on_error: bool = False,
-        csv_path: Path | None = None,
-    ) -> dict[str, Path | str | Exception]:
+        feature_path: Path | None = None,
+        algo_names: list[str] | None = None,
+        ) -> dict[str, str]:
         """
         Train every model in the config with `enabled: true` (the default).
 
@@ -367,15 +384,15 @@ class ModelTrainer:
         bad grid on one algorithm doesn't stop the others from training;
         pass stop_on_error=True to raise immediately instead.
 
-        Returns a dict mapping algo_name -> (X_test, y_test) on success, or
-        algo_name -> the raised exception on failure.
+        Returns a dict mapping algo_name to saved model path on success, or the
+        error message on failure.
         """
 
-        algo_names = self.fetch_algo_names()
+        algo_names = algo_names or self.fetch_algo_names()
         if not algo_names:
             logger.warning("No enabled models found in config; nothing to train.")
 
-        results: dict[str, Path | str | Exception] = {}
+        results: dict[str, str] = {}
 
         pipeline_params = {
             "seed": self.seed,
@@ -383,31 +400,28 @@ class ModelTrainer:
             "scoring": self.params_config["scoring"],
         }
 
-        with pipeline_run(seed=self.seed, params=pipeline_params) as run_context:
-            if run_context is not None:
-                import mlflow
+        tracker = MLflowTracker(self.param_path)
 
-                mlflow.log_artifact(str(self.hyperparams_config_path))
+        with tracker.pipeline_run(seed=self.seed, params=pipeline_params) as run_context:
+            if run_context is not None:
+                tracker.log_artifact(self.hyperparams_config_path)
 
             for algo_name in algo_names:
                 logger.info("=== Training '%s' ===", algo_name)
-                with start_model_run(
-                    algo_name, run_context, stage="training"
-                ) as run_id:
+                with tracker.model_run(algo_name, run_context, stage="training") as run_id:
                     try:
-                        model_path, grid_search = self._train_model(
-                            algo_name=algo_name, csv_path=csv_path
+                        result, fitted_model = self._fit_and_save_model(
+                            algo_name=algo_name, feature_path=feature_path
                         )
-                        results[algo_name] = str(model_path)
+                        results[algo_name] = result.to_model_paths_value()
 
-                        log_training_run(
-                            model=grid_search.best_estimator_,
+                        tracker.log_training(
+                            model=fitted_model,
                             algo_name=algo_name,
-                            cv_best_score=float(grid_search.best_score_),
-                            best_params=grid_search.best_params_,
+                            cv_best_score=float(result.best_score),
+                            best_params=result.best_params,
                             scoring=self.params_config["scoring"],
                             seed=self.seed,
-                            context=run_context,
                             run_id=run_id,
                         )
 
@@ -415,10 +429,9 @@ class ModelTrainer:
                         if stop_on_error:
                             raise
                         logger.error("Training failed for '%s': %s", algo_name, exc)
-                        log_training_failure(str(exc))
+                        tracker.log_training_failure(str(exc))
                         results[algo_name] = str(exc)
 
-        # saved the paths in a json file, to be used later during threshold optimization or model evaluation phase to load models.
         create_dir(SAVED_MODELS_PATH)
         ModelIO.save_json(
             data=results, path=SAVED_MODELS_PATH / f"model_paths_{self.seed}.json"
@@ -427,22 +440,22 @@ class ModelTrainer:
         return results
 
 
-def model_trainer(csv_path: Path, algo_name: str = "xgboost") -> Path:
+def model_trainer(feature_path: Path, algo_name: str = "XGBoost") -> Path:
     """
     Train a single model and return the path of the saved model.
     """
 
-    return ModelTrainer().train(algo_name=algo_name, csv_path=csv_path)
+    return ModelTrainer().train(algo_name=algo_name, feature_path=feature_path)
 
 
 def train_all_models(
-    csv_path: Path, stop_on_error: bool = False
-) -> dict[str, Path | str | Exception]:
+    feature_path: Path, stop_on_error: bool = False
+) -> dict[str, str]:
     """
     Train all enabled models from the YAML file and return
     """
 
-    return ModelTrainer().train_all(csv_path=csv_path, stop_on_error=stop_on_error)
+    return ModelTrainer().train_all(feature_path=feature_path, stop_on_error=stop_on_error)
 
 
 if __name__ == "__main__":

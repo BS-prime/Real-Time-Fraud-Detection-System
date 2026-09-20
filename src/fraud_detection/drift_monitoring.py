@@ -53,12 +53,12 @@ class DriftMonitor:
         """Load a dataset that is already feature-engineered or derive features as needed."""
         feature_path = self.feature_dir / dataset_name
         if feature_path.exists():
-            return pd.read_csv(feature_path)
+            return pd.read_parquet(feature_path)
 
         seed = seed_from_filename(dataset_name)
-        derived_feature_path = self.feature_dir / f"fraud_features_seed_{seed}.csv"
+        derived_feature_path = self.feature_dir / f"fraud_features_seed_{seed}.parquet"
         if derived_feature_path.exists():
-            return pd.read_csv(derived_feature_path)
+            return pd.read_parquet(derived_feature_path)
 
         simulated_path = self.simulated_dir / dataset_name
         if simulated_path.exists():

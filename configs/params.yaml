@@ -18,7 +18,7 @@ model_training:
   seed: 42 # !!! should be the same as data_ingestion.seed and feature_engineering.seed
   cv_folds: 3
   random_state: 42
-  scoring: "recall"
+  scoring: "average_precision"
 
 threshold_optimization:
   seed: 42

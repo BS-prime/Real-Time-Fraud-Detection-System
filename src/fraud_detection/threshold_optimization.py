@@ -12,11 +12,7 @@ import yaml
 from sklearn.metrics import confusion_matrix
 
 from fraud_detection.feature_schema import TARGET_COLUMN
-from fraud_detection.mlflow_tracking import (
-    log_threshold_run,
-    resume_pipeline_run,
-    start_model_run,
-)
+from fraud_detection.mlflow_tracking import MLflowTracker
 from fraud_detection.model_io import (
     align_features_to_model,
     load_model,
@@ -189,7 +185,7 @@ def _load_successful_model_paths(seed: int | str) -> dict[str, str]:
             successful[algo_name] = path_or_error
         else:
             logger.warning(
-                "Skipping %s: not a valid model path (%s)", algo_name, path_or_error
+                "Skipping %s: has not a valid model path (%s)", algo_name, path_or_error
             )
     return successful
 
@@ -199,7 +195,7 @@ def _load_test_data(seed: int | str) -> tuple[pd.DataFrame, pd.Series]:
     if not test_path.exists():
         raise FileNotFoundError(f"Test feature file not found: {test_path}")
 
-    df = pd.read_csv(test_path)
+    df = pd.read_parquet(test_path)
     X_test = df.drop(columns=[TARGET_COLUMN])
     y_test = df[TARGET_COLUMN]
     return X_test, y_test
@@ -215,7 +211,8 @@ def run_threshold_optimization() -> dict[str, dict[str, float]]:
     cost_fp = float(params["cost_fp"])
     cost_fn = float(params["cost_fn"])
 
-    run_context = resume_pipeline_run(seed)
+    tracker = MLflowTracker()
+    run_context = tracker.resume_pipeline_run(seed)
     model_paths = _load_successful_model_paths(seed)
     X_test, y_test = _load_test_data(seed)
 
@@ -226,7 +223,7 @@ def run_threshold_optimization() -> dict[str, dict[str, float]]:
         model_name = Path(model_path_str).name
         logger.info("=== Optimizing threshold for '%s' ===", algo_name)
 
-        with start_model_run(algo_name, run_context, stage="threshold"):
+        with tracker.model_run(algo_name, run_context, stage="threshold"):
             _, _, threshold_info, output_path = optimizer.optimize(
                 X_test=X_test,
                 y_test=y_test,
@@ -235,7 +232,7 @@ def run_threshold_optimization() -> dict[str, dict[str, float]]:
                 cost_fn=cost_fn,
                 save=True,
             )
-            log_threshold_run(threshold_info, output_path)
+            tracker.log_threshold(threshold_info, output_path)
             summary[algo_name] = threshold_info
 
     summary_path = threshold_summary_path(seed)

@@ -15,7 +15,7 @@ stages:
           - data_ingestion.n_users
           - data_ingestion.n_tx
     outs:
-      - data/simulated/simulated_transactions_seed_${data_ingestion.seed}.csv
+      - data/simulated/simulated_transactions_seed_${data_ingestion.seed}.parquet
   
   feature_engineering:
     cmd: uv run src/fraud_detection/feature_engineering.py
@@ -25,7 +25,7 @@ stages:
       - src/fraud_detection/geo.py
       - src/fraud_detection/naming.py
       - src/fraud_detection/paths.py
-      - data/simulated/simulated_transactions_seed_${data_ingestion.seed}.csv
+      - data/simulated/simulated_transactions_seed_${data_ingestion.seed}.parquet
     params:
       - configs/params.yaml:
           - data_ingestion.seed
@@ -33,8 +33,8 @@ stages:
           - feature_engineering.rolling_window
           - feature_engineering.min_hours_between_tx
     outs:
-      - data/features/fraud_features_train_seed_${data_ingestion.seed}.csv
-      - data/features/fraud_features_test_seed_${data_ingestion.seed}.csv
+      - data/features/fraud_features_train_seed_${data_ingestion.seed}.parquet
+      - data/features/fraud_features_test_seed_${data_ingestion.seed}.parquet
   
   model_training:
     cmd: uv run src/fraud_detection/model_training.py
@@ -43,8 +43,8 @@ stages:
       - src/fraud_detection/paths.py
       - src/fraud_detection/mlflow_tracking.py
       - src/fraud_detection/model_io.py
-      - data/features/fraud_features_train_seed_${data_ingestion.seed}.csv
-      - data/features/fraud_features_test_seed_${data_ingestion.seed}.csv
+      - data/features/fraud_features_train_seed_${data_ingestion.seed}.parquet
+      - data/features/fraud_features_test_seed_${data_ingestion.seed}.parquet
       - src/fraud_detection/model_training.py
     params:
       - configs/params.yaml:
@@ -64,7 +64,7 @@ stages:
       - src/fraud_detection/feature_schema.py
       - src/fraud_detection/paths.py
       - artifacts/model_paths/model_paths_${data_ingestion.seed}.json
-      - data/features/fraud_features_test_seed_${data_ingestion.seed}.csv
+      - data/features/fraud_features_test_seed_${data_ingestion.seed}.parquet
     params:
       - configs/params.yaml:
           - data_ingestion.seed
@@ -85,7 +85,7 @@ stages:
       - src/fraud_detection/paths.py
       - artifacts/model_paths/model_paths_${data_ingestion.seed}.json
       - artifacts/model_thresholds/threshold_summary_${data_ingestion.seed}.json
-      - data/features/fraud_features_test_seed_${data_ingestion.seed}.csv
+      - data/features/fraud_features_test_seed_${data_ingestion.seed}.parquet
     params:
       - configs/params.yaml:
           - data_ingestion.seed

@@ -20,6 +20,7 @@ ARTIFACTS_DIR: Path = PROJECT_ROOT / "artifacts"
 MODEL_DIR: Path = ARTIFACTS_DIR / "models"
 THRESHOLD_DIR: Path = ARTIFACTS_DIR / "model_thresholds"
 MLFLOW_DIR: Path = ARTIFACTS_DIR / "mlflow"
+MLFLOW_TRACKING_DB: Path = PROJECT_ROOT / "mlflow.db"
 
 # evaluation
 EVALUATION_DIR: Path = PROJECT_ROOT / "model_evaluation"
@@ -44,26 +45,26 @@ def create_dir(path: Path) -> Path:
 
 def simulated_transactions_path(seed: int | str) -> Path:
     """
-    Return the standard raw transaction CSV path for a seed.
+    Return the standard raw transaction Parquet path for a seed.
     """
 
-    return SIMULATED_DATA_DIR / f"simulated_transactions_seed_{seed}.csv"
+    return SIMULATED_DATA_DIR / f"simulated_transactions_seed_{seed}.parquet"
 
 
 def train_feature_file_path(seed: int | str) -> Path:
     """
-    Return the standard engineered feature CSV path for a seed.
+    Return the standard engineered training-feature Parquet path for a seed.
     """
 
-    return FEATURE_DATA_DIR / f"fraud_features_train_seed_{seed}.csv"
+    return FEATURE_DATA_DIR / f"fraud_features_train_seed_{seed}.parquet"
 
 
 def test_feature_file_path(seed: int | str) -> Path:
     """
-    Return the standard engineered feature CSV path for a seed.
+    Return the standard engineered test-feature Parquet path for a seed.
     """
 
-    return FEATURE_DATA_DIR / f"fraud_features_test_seed_{seed}.csv"
+    return FEATURE_DATA_DIR / f"fraud_features_test_seed_{seed}.parquet"
 
 
 def mlflow_run_context_path(seed: int | str) -> Path:

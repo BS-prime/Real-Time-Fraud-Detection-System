@@ -19,7 +19,6 @@ import numpy as np
 import pandas as pd
 import yaml
 from pandas import DataFrame
-from pandas.io.parsers import TextFileReader
 
 from fraud_detection.feature_schema import (
     AUTH_METHODS,
@@ -29,9 +28,7 @@ from fraud_detection.feature_schema import (
 )
 from fraud_detection.geo import haversine_km
 from fraud_detection.paths import (
-    FEATURE_DATA_DIR,
     PARAMS_CONFIG_PATH,
-    SIMULATED_DATA_DIR,
     create_dir,
     simulated_transactions_path,
     test_feature_file_path,
@@ -49,7 +46,7 @@ __all__ = [
     "load_transactions",
 ]
 
-# Columns that must exist in the raw transaction CSV for feature
+# Columns that must exist in the raw transaction Parquet for feature
 # engineering to run at all. Distinct from NON_MODEL_COLUMNS below,
 # which is about what survives into the final model matrix.
 REQUIRED_RAW_COLUMNS = [
@@ -97,14 +94,14 @@ class FeatureEngineer:
     def __init__(
             self,
             params_config_path: Path = PARAMS_CONFIG_PATH,
-            csv_path: Path = SIMULATED_DATA_DIR / "simulated_transactions_seed_42.csv",
-            train_output_path: Path = FEATURE_DATA_DIR / "fraud_features_train_seed_42.csv",
-            test_output_path: Path = FEATURE_DATA_DIR / "fraud_features_test_seed_42.csv",
+            transactions_path: Path | None = None,
+            train_output_path: Path | None = None,
+            test_output_path: Path | None = None,
     ) -> None:
         self.params_config_path = params_config_path
         self.params_config = self._load_params_config()
         self.seed = self.params_config.get("seed", 42)
-        self.csv_path = csv_path or simulated_transactions_path(self.seed)
+        self.transactions_path = transactions_path or simulated_transactions_path(self.seed)
         self.train_output_path = train_output_path or train_feature_file_path(self.seed)
         self.test_output_path = test_output_path or test_feature_file_path(self.seed)
 
@@ -121,19 +118,17 @@ class FeatureEngineer:
         with self.params_config_path.open("r", encoding="utf-8") as file:
             return yaml.safe_load(file)["feature_engineering"]
 
-    def load_transactions(self, csv_path: Path) -> pd.DataFrame:
+    def load_transactions(self, transactions_path: Path | None = None) -> pd.DataFrame:
         """
-        Load a raw transaction CSV from the simulated data directory and validate that it contains the required columns. Returns a DataFrame of the raw transactions.
+        Load a raw transaction Parquet from the simulated data directory and validate that it contains the required columns. Returns a DataFrame of the raw transactions.
         """
 
-        csv_path = csv_path or self.csv_path
-        if not csv_path.exists():
-            raise FileNotFoundError(f"Transaction file not found: {csv_path}")
+        transactions_path = transactions_path or self.transactions_path
+        if not transactions_path.exists():
+            raise FileNotFoundError(f"Transaction file not found: {transactions_path}")
 
-        print(f"Loading csv from: {csv_path}")
-        df = pd.read_csv(csv_path)
-
-        return df
+        logger.info("Loading parquet from: %s", transactions_path)
+        return pd.read_parquet(transactions_path)
 
     def train_test_split(
             self, features: pd.DataFrame
@@ -161,19 +156,19 @@ class FeatureEngineer:
     @staticmethod
     def save_features(features: pd.DataFrame, file_path: Path) -> None:
         """
-        Save the engineered feature matrix to a CSV in the feature data directory.
+        Save the engineered feature matrix to Parquet in the feature data directory.
         """
 
         output_dir = create_dir(file_path.parent)
         output_path = output_dir / file_path.name
 
         fd, tmp_name = tempfile.mkstemp(
-            prefix=output_path.stem + ".", suffix=".tmp.csv", dir=output_dir
+            prefix=output_path.stem + ".", suffix=".tmp.parquet", dir=output_dir
         )
         os.close(fd)
         tmp_path = Path(tmp_name)
         try:
-            features.to_csv(tmp_path, index=False)
+            features.to_parquet(tmp_path, index=False)
             os.replace(tmp_path, output_path)
         except Exception:
             tmp_path.unlink(missing_ok=True)
@@ -371,13 +366,13 @@ class FeatureEngineer:
         return df[output_columns]
 
     def feature_engineer(
-            self, csv_path: Path = SIMULATED_DATA_DIR / "simulated_transactions_seed_42.csv"
+            self, transactions_path: Path | None = None
     ) -> tuple[Path, Path]:
         """
-        Load, engineer, and persist features for a single raw CSV.
+        Load, engineer, and persist features for a single raw Parquet file.
         """
 
-        transactions = self.load_transactions(csv_path)
+        transactions = self.load_transactions(transactions_path)
         train_df, test_df = self.train_test_split(transactions)
         train_df = self.engineer_transaction_features(train_df)
         self.save_features(train_df, self.train_output_path)
@@ -388,12 +383,12 @@ class FeatureEngineer:
 # FEATURE ENGINEERING API FUNCTIONS
 
 
-def load_transactions(csv_path: Path) -> TextFileReader | DataFrame:
+def load_transactions(transactions_path: Path) -> DataFrame:
     """
-    Validate and load a raw transaction CSV from the simulated data directory. Returns a DataFrame of the raw transactions.
+    Validate and load a raw transaction Parquet from the simulated data directory. Returns a DataFrame of the raw transactions.
     """
 
-    return FeatureEngineer().load_transactions(csv_path)
+    return FeatureEngineer().load_transactions(transactions_path)
 
 
 def engineer_transaction_features(transactions: pd.DataFrame) -> pd.DataFrame:
@@ -405,15 +400,15 @@ def engineer_transaction_features(transactions: pd.DataFrame) -> pd.DataFrame:
 
 
 def batch_feature_engineer(
-        csv_path: Path = SIMULATED_DATA_DIR / "simulated_transactions_seed_42.csv",
+        transactions_path: Path | None = None,
 ) -> tuple[Path, Path]:
     """
-    Perform feature engineer and save train and test as csv.
+    Perform feature engineering and save train and test as Parquet.
     """
 
-    return FeatureEngineer().feature_engineer(csv_path)
+    return FeatureEngineer().feature_engineer(transactions_path)
 
 
 if __name__ == "__main__":
     engineer = FeatureEngineer()
-    engineer.feature_engineer(csv_path=engineer.csv_path)
+    engineer.feature_engineer(transactions_path=engineer.transactions_path)

@@ -1,20 +1,14 @@
 """Tests for MLflow tracking helpers."""
 
-import json
-import tempfile
-from pathlib import Path
-
-import pytest
-
 from fraud_detection.mlflow_tracking import (
     MLflowConfig,
+    MLflowTracker,
     ModelCandidate,
     RunContext,
     load_mlflow_config,
     resolve_tracking_uri,
     select_champion,
 )
-from fraud_detection.paths import mlflow_run_context_path
 
 
 def test_resolve_tracking_uri_prefers_env(monkeypatch, tmp_path):
@@ -26,7 +20,8 @@ def test_resolve_tracking_uri_prefers_env(monkeypatch, tmp_path):
 def test_resolve_tracking_uri_falls_back_to_local(tmp_path):
     config = MLflowConfig(tracking_uri=None)
     uri = resolve_tracking_uri(config)
-    assert uri.startswith("file:")
+    assert uri.startswith("sqlite:///")
+    assert uri.endswith("mlflow.db")
 
 
 def test_select_champion_by_min_cost():
@@ -114,16 +109,22 @@ def test_run_context_round_trip(tmp_path, monkeypatch):
         },
     )
 
-    path = mlflow_run_context_path(42)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", encoding="utf-8") as file:
-        json.dump(context.to_dict(), file)
+    tracker = MLflowTracker()
+    tracker.save_run_context(context)
+    loaded = tracker.load_run_context(42)
 
-    with path.open("r", encoding="utf-8") as file:
-        loaded = RunContext.from_dict(json.load(file))
-
+    assert loaded is not None
     assert loaded.parent_run_id == "parent123"
     assert loaded.model_runs["XGBoost"]["model_uri"] == "runs:/child789/model"
+
+
+def test_tracker_resume_returns_none_when_disabled(tmp_path):
+    params_file = tmp_path / "params.yaml"
+    params_file.write_text("mlflow:\n  enabled: false\n", encoding="utf-8")
+
+    tracker = MLflowTracker(params_file)
+
+    assert tracker.resume_pipeline_run(seed=42) is None
 
 
 def test_load_mlflow_config_defaults(tmp_path):

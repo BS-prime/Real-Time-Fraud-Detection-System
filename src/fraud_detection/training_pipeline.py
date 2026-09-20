@@ -1,79 +1,64 @@
 """
-# End-to-end training pipeline for fraud detection model.
+End-to-end orchestration for the fraud detection training workflow.
 """
 
-from encodings import utf_16
 import logging
 from datetime import UTC, datetime
 
-from fraud_detection.data_ingestion import generate_transactions_data
+from fraud_detection.data_ingestion import simulate_transactions_data
 from fraud_detection.feature_engineering import batch_feature_engineer
-from fraud_detection.model_evaluation import model_evaluator
-from fraud_detection.model_training import model_trainer
-from fraud_detection.threshold_optimization import threshold_optimizer
+from fraud_detection.model_evaluation import run_model_evaluation
+from fraud_detection.model_training import ModelTrainer
+from fraud_detection.threshold_optimization import run_threshold_optimization
 
 logger = logging.getLogger(__name__)
 
 
 class TrainingPipeline:
     """
-    Orchestrate the fraud detection training workflow.
+    Run the same stage sequence used by DVC from a Python entrypoint.
     """
-
-    def __init__(self) -> None:
-        self.steps = [
-            "Generating transaction data",
-            "Engineering features",
-            "Training model",
-            "Optimizing decision threshold",
-            "Evaluating model",
-        ]
 
     def run(
         self,
         n_tx: int = 1_000_000,
         n_users: int = 5_000,
         seed: int = 42,
-        algo_name: str = "XGBoost",
+        algo_name: str | None = None,
     ) -> dict[str, object]:
+        logger.info("Fraud detection training pipeline started")
+        start_time = datetime.now(tz=UTC)
 
-        # 0. logging the pipeline start
-        logger.info("FRAUD DETECTION TRAINING PIPELINE STARTED")
-        start_time = datetime.now()
+        simulated_path = simulate_transactions_data(
+            n_tx=n_tx,
+            n_users=n_users,
+            seed=seed,
+        )
+        train_path, _ = batch_feature_engineer(simulated_path)
 
-        # 1. generate transactions data
-        logger.info("[1/5] %s", self.steps[0])
-        generate_transactions_data(n_tx=n_tx, n_users=n_users, seed=seed)
-        simulated_file = f"simulated_transactions_seed_{seed}.csv"
+        trainer = ModelTrainer(train_file_path=train_path)
+        if algo_name:
+            trained_models = trainer.train_all(
+                stop_on_error=True,
+                feature_path=train_path,
+                algo_names=[algo_name],
+            )
+        else:
+            trained_models = trainer.train_all(stop_on_error=False, feature_path=train_path)
 
-        # 2. perform feature engineering
-        logger.info("[2/5] %s", self.steps[1])
-        batch_feature_engineer(simulated_file)
-        features_file = f"fraud_features_seed_{seed}.csv"
+        threshold_summary = run_threshold_optimization()
+        evaluation_summary = run_model_evaluation()
 
-        # 3. model training
-        logger.info("[3/5] %s", self.steps[2])
-        X_test, y_test = model_trainer(csv_name=features_file, algo_name=algo_name)
-        model_name = f"{algo_name}_seed_{seed}.json"
-
-        # 4. business cost-aware thresholding
-        logger.info("[4/5] %s", self.steps[3])
-        y_prob, y_pred = threshold_optimizer(X_test, y_test, model_name=model_name)
-
-        # 5. model evaluation
-        logger.info("[5/5] %s", self.steps[4])
-        model_evaluator(model_name, X_test, y_test, y_prob, y_pred)
-
-        # 6. logging the ending of pipeline
         end_time = datetime.now(tz=UTC)
         duration = (end_time - start_time).total_seconds()
-
-        logger.info("PIPELINE COMPLETED SUCCESSFULLY in %.2f seconds", duration)
+        logger.info("Pipeline completed successfully in %.2f seconds", duration)
 
         return {
             "status": "SUCCESS",
-            "model_name": model_name,
             "seed": seed,
+            "trained_models": trained_models,
+            "threshold_summary": threshold_summary,
+            "evaluation_summary": evaluation_summary,
             "duration_seconds": duration,
             "completed_at": end_time.isoformat(),
         }
@@ -83,10 +68,10 @@ def run_training_pipeline(
     n_tx: int = 10_000,
     n_users: int = 500,
     seed: int = 42,
-    algo_name: str = "xgboost",
+    algo_name: str | None = None,
 ) -> dict[str, object]:
     """
-    executing the training pipeline
+    Execute the Python training pipeline.
     """
 
     return TrainingPipeline().run(
@@ -98,4 +83,5 @@ def run_training_pipeline(
 
 
 if __name__ == "__main__":
-    run_training_pipeline(n_tx=1_000_000, n_users=5_000, seed=42, algo_name="xgboost")
+    logging.basicConfig(level=logging.INFO)
+    run_training_pipeline()

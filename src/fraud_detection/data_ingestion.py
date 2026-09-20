@@ -9,7 +9,6 @@ tries to look normal, and some normal behavior looks anomalous. Search for
 "OVERLAP:" comments below for the specific places this is engineered in.
 """
 
-import csv
 import logging
 import random
 from dataclasses import dataclass
@@ -18,6 +17,8 @@ from pathlib import Path
 from typing import Any
 
 import pandas as pd
+import pyarrow as pa
+import pyarrow.parquet as pq
 import yaml
 from faker import Faker
 
@@ -124,7 +125,7 @@ class TransactionSimulator:
         self.stealthy_fraud_share = (
             self.params_config.get("stealthy_fraud_share", 0.30) or stealthy_fraud_share
         )
-        self.output_file_name = simulated_transactions_path(self.seed)
+        self.output_file_name = simulated_transactions_path(self.seed).name
         self.output_dir = output_dir
         self.start_date = datetime(2023, 1, 1, 0, 0, 0, tzinfo=UTC)
         self.fake = Faker()
@@ -404,7 +405,7 @@ class TransactionSimulator:
 
     def _transaction_columns(self) -> list[str]:
         """
-        Define the column order for the output CSV. This ensures consistent ordering regardless of how dictionaries are iterated or how DataFrames are constructed.
+        Define the column order for the output Parquet file. This ensures consistent ordering regardless of how dictionaries are iterated or how DataFrames are constructed.
         """
 
         return [
@@ -447,7 +448,7 @@ class TransactionSimulator:
             # 4. Update the profile's last transaction time to the current transaction's timestamp, ensuring that subsequent transactions for this user are generated with the correct temporal context.
             profile.last_tx_time = transaction["timestamp"]
             # Drop internal bookkeeping field before this row is exposed
-            # to callers/CSV output.
+            # to callers/Parquet output.
             del transaction["_previous_tx_time"]
             yield transaction
 
@@ -455,30 +456,17 @@ class TransactionSimulator:
         self, transactions: pd.DataFrame | list[dict[str, object]] | object
     ) -> Path:
         """
-        Save the generated transactions to a CSV file.
+        Save the generated transactions to a Parquet file.
         """
-        
+
         create_dir(self.output_dir)
         output_path = self.output_dir / self.output_file_name
 
-        # If the transactions are already a DataFrame, use its built-in CSV writer.
         if isinstance(transactions, pd.DataFrame):
-            transactions.to_csv(output_path, index=False)
+            transactions.to_parquet(output_path, index=False)
             row_count = len(transactions)
-
-        # If the transactions are a list of dictionaries, write them manually with csv.DictWriter.
         else:
-            rows_written = 0
-            fieldnames = self._transaction_columns()
-
-            # Write the transactions to the CSV file using DictWriter, ensuring consistent column order and handling any missing keys by writing empty strings.
-            with output_path.open("w", newline="", encoding="utf-8") as stream:
-                writer = csv.DictWriter(stream, fieldnames=fieldnames)
-                writer.writeheader()
-                for row in transactions:
-                    writer.writerow({key: row[key] for key in fieldnames})
-                    rows_written += 1
-            row_count = rows_written
+            row_count = self._write_parquet_rows(transactions, output_path)
 
         logger.info(
             "Saved simulated transaction data to %s with %d rows",
@@ -487,9 +475,47 @@ class TransactionSimulator:
         )
         return output_path
 
+    def _write_parquet_rows(
+        self, transactions: object, output_path: Path, batch_size: int = 50_000
+    ) -> int:
+        """
+        Stream row dictionaries to Parquet in batches to avoid holding the full dataset in memory.
+        """
+
+        fieldnames = self._transaction_columns()
+        writer: pq.ParquetWriter | None = None
+        batch: list[dict[str, object]] = []
+        rows_written = 0
+
+        def flush() -> None:
+            nonlocal writer, batch
+            if not batch:
+                return
+            table = pa.Table.from_pandas(
+                pd.DataFrame(batch, columns=fieldnames),
+                preserve_index=False,
+            )
+            if writer is None:
+                writer = pq.ParquetWriter(output_path, table.schema)
+            writer.write_table(table)
+            batch = []
+
+        try:
+            for row in transactions:
+                batch.append({key: row[key] for key in fieldnames})
+                rows_written += 1
+                if len(batch) >= batch_size:
+                    flush()
+            flush()
+        finally:
+            if writer is not None:
+                writer.close()
+
+        return rows_written
+
     def generate_transactions_data(self) -> Path:
         """
-        Generate simulated transaction data and save it to a CSV file.
+        Generate simulated transaction data and save it to a Parquet file.
         """
 
         return self.save(self._transaction_rows(n_tx=self.n_tx))
@@ -507,7 +533,7 @@ def simulate_transactions_data(
     output_dir: Path | None = None,
 ) -> Path:
     """
-    Generate simulated transactions and save them to a CSV file.
+    Generate simulated transactions and save them to a Parquet file.
     """
 
     simulator = TransactionSimulator(
@@ -522,6 +548,34 @@ def simulate_transactions_data(
         params_path=params_path,
     )
     return simulator.generate_transactions_data()
+
+
+def generate_transactions_data(
+    n_tx: int = 1_000_000,
+    n_users: int = 5_000,
+    seed: int = 42,
+    fraud_rate: float = 0.015,
+    signal_noise_rate: float = 0.15,
+    legit_anomaly_rate: float = 0.04,
+    stealthy_fraud_share: float = 0.30,
+    params_path: Path = PARAMS_CONFIG_PATH,
+    output_dir: Path | None = None,
+) -> Path:
+    """
+    Backward-compatible alias for transaction simulation.
+    """
+
+    return simulate_transactions_data(
+        n_tx=n_tx,
+        n_users=n_users,
+        seed=seed,
+        fraud_rate=fraud_rate,
+        signal_noise_rate=signal_noise_rate,
+        legit_anomaly_rate=legit_anomaly_rate,
+        stealthy_fraud_share=stealthy_fraud_share,
+        params_path=params_path,
+        output_dir=output_dir,
+    )
 
 
 if __name__ == "__main__":

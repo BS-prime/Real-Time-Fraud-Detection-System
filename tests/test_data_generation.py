@@ -4,7 +4,6 @@ from fraud_detection.data_ingestion import generate_transactions_data
 from fraud_detection.feature_engineering import engineer_transaction_features
 from fraud_detection.feature_schema import FEATURE_COLUMNS, TARGET_COLUMN
 
-
 EXPECTED_RAW_COLUMNS = {
     "tx_id",
     "timestamp",
@@ -34,7 +33,7 @@ def test_generated_transactions_include_realistic_card_fields(tmp_path):
         seed=2026,
         output_dir=tmp_path,
     )
-    transactions = pd.read_csv(output_path)
+    transactions = pd.read_parquet(output_path)
 
     assert EXPECTED_RAW_COLUMNS.issubset(transactions.columns)
     assert transactions["amount"].gt(0).all()
@@ -48,7 +47,13 @@ def test_generated_transactions_include_realistic_card_fields(tmp_path):
     fraud = transactions[transactions["is_fraud"].eq(1)]
     assert fraud["fraud_pattern"].nunique() >= 3
     assert set(fraud["fraud_pattern"]).issubset(
-        {"high_amount", "stolen_card", "impossible_travel", "card_testing"}
+        {
+            "account_takeover",
+            "card_testing",
+            "high_amount",
+            "impossible_travel",
+            "stolen_card",
+        }
     )
 
 
@@ -59,7 +64,7 @@ def test_generated_transactions_are_feature_engineering_compatible(tmp_path):
         seed=77,
         output_dir=tmp_path,
     )
-    transactions = pd.read_csv(output_path)
+    transactions = pd.read_parquet(output_path)
 
     features = engineer_transaction_features(transactions)
 
@@ -82,7 +87,7 @@ def test_generation_is_reproducible_for_seed(tmp_path):
         output_dir=tmp_path / "second",
     )
 
-    first = pd.read_csv(first_path)
-    second = pd.read_csv(second_path)
+    first = pd.read_parquet(first_path)
+    second = pd.read_parquet(second_path)
 
     pd.testing.assert_frame_equal(first, second)

@@ -1,4 +1,6 @@
-"""Convenient public imports for the fraud detection package."""
+"""
+Convenient public imports for the fraud detection package.
+"""
 
 from importlib import import_module
 
@@ -12,11 +14,14 @@ _EXPORTS = {
     "run_training_pipeline": "fraud_detection.training_pipeline",
 }
 
-__all__ = list(_EXPORTS)
+__all__ = list[str](_EXPORTS)
 
 
 def __getattr__(name: str):
-    """Load public helpers only when they are requested."""
+    """
+    Load public helpers only when they are requested.
+    """
+
     if name not in _EXPORTS:
         raise AttributeError(f"module 'fraud_detection' has no attribute '{name}'")
 

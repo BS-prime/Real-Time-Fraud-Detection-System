@@ -1,6 +1,1 @@
-{
-  "best_threshold": 0.97,
-  "min_cost": 0.0,
-  "cost_fp": 1.0,
-  "cost_fn": 10.0
-}
+{"best_threshold": 0.11, "min_cost": 999.0, "cost_fp": 1.0, "cost_fn": 10.0}

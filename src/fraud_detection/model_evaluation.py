@@ -12,6 +12,7 @@ import numpy as np
 import pandas as pd
 import shap
 import yaml
+from shap.utils._exceptions import InvalidModelError
 from sklearn.metrics import (
     accuracy_score,
     average_precision_score,
@@ -21,16 +22,10 @@ from sklearn.metrics import (
     recall_score,
 )
 
-from fraud_detection.feature_schema import TARGET_COLUMN
 from fraud_detection.mlflow_tracking import (
+    MLflowTracker,
     ModelCandidate,
-    load_mlflow_config,
-    load_run_context,
-    log_evaluation_run,
-    register_champion_model,
-    resume_pipeline_run,
     select_champion,
-    start_model_run,
 )
 from fraud_detection.model_io import (
     align_features_to_model,
@@ -108,19 +103,38 @@ class ModelEvaluator:
         return float(average_precision)
 
     @staticmethod
-    def _shap_values_for_plot(model, features: pd.DataFrame):
+    def _shap_explainer(model, features: pd.DataFrame):
         """
-        calculate how each feature is contribution to the prediction.
+        Pick a SHAP explainer that matches the estimator family.
         """
 
-        explainer = shap.TreeExplainer(model)
-        shap_values = explainer.shap_values(features)
+        try:
+            return shap.TreeExplainer(model)
+        except InvalidModelError:
+            return shap.LinearExplainer(model, features)
 
+    @staticmethod
+    def _positive_class_shap_values(shap_values):
+        """
+        Reduce multi-output SHAP arrays to the fraud (positive) class.
+        """
+
+        if hasattr(shap_values, "values"):
+            shap_values = shap_values.values
         if isinstance(shap_values, list):
             return shap_values[1]
         if getattr(shap_values, "ndim", 2) == 3:
             return shap_values[:, :, 1]
         return shap_values
+
+    @classmethod
+    def _shap_values_for_plot(cls, model, features: pd.DataFrame):
+        """
+        Calculate how each feature contributes to the prediction.
+        """
+
+        explainer = cls._shap_explainer(model, features)
+        return cls._positive_class_shap_values(explainer.shap_values(features))
 
     def _plot_shap_summary(
         self, model, features: pd.DataFrame, output_path: Path
@@ -243,7 +257,8 @@ def run_model_evaluation() -> dict[str, dict[str, float | str]]:
     evaluator = ModelEvaluator()
     seed = evaluator.seed
 
-    run_context = resume_pipeline_run(seed)
+    tracker = MLflowTracker()
+    run_context = tracker.resume_pipeline_run(seed)
     model_paths = _load_successful_model_paths(seed)
     threshold_summary = _load_threshold_summary(seed)
     X_test, y_test = _load_test_data(seed)
@@ -262,7 +277,7 @@ def run_model_evaluation() -> dict[str, dict[str, float | str]]:
 
         logger.info("=== Evaluating '%s' ===", algo_name)
 
-        with start_model_run(algo_name, run_context, stage="evaluation"):
+        with tracker.model_run(algo_name, run_context, stage="evaluation"):
             y_prob, y_pred = _predict_at_threshold(model_name, X_test, best_threshold)
             metrics = evaluator.evaluate(
                 model_name=model_name,
@@ -272,7 +287,7 @@ def run_model_evaluation() -> dict[str, dict[str, float | str]]:
                 y_pred_final=y_pred,
             )
 
-            log_evaluation_run(
+            tracker.log_evaluation(
                 metrics={
                     "accuracy": float(metrics["accuracy"]),
                     "precision": float(metrics["precision"]),
@@ -293,7 +308,7 @@ def run_model_evaluation() -> dict[str, dict[str, float | str]]:
                 "min_cost": threshold_info["min_cost"],
             }
 
-            mlflow_context = load_run_context(seed)
+            mlflow_context = tracker.load_run_context(seed)
             if mlflow_context and algo_name in mlflow_context.model_runs:
                 model_run = mlflow_context.model_runs[algo_name]
                 candidates.append(
@@ -314,8 +329,7 @@ def run_model_evaluation() -> dict[str, dict[str, float | str]]:
 
     champion = select_champion(candidates)
     if champion is not None:
-        mlflow_config = load_mlflow_config()
-        register_champion_model(champion, mlflow_config.model_registry_name)
+        tracker.register_champion(champion)
         evaluation_summary["_champion"] = {
             "algo_name": champion.algo_name,
             "min_cost": champion.min_cost,

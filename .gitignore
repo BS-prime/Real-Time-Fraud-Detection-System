@@ -2,6 +2,13 @@
 .DS_Store
 .vscode/
 .idea/
+.cursor/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
 
 # Python caches and artifacts
 __pycache__/
@@ -45,8 +52,10 @@ artifacts/model_paths
 reports/model_evaluation/
 reports/drift_monitoring/
 reports/shap/
+reports/threshold_optimization/
 
 # MLflow
 mlruns/
+mlflow.db
 artifacts/mlflow/
 
